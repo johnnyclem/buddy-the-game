@@ -10,6 +10,10 @@ function gameStep() {
 function gameLoop() {
   if (state.mode === 'play') {
     gameStep();
+  } else if (state.mode === 'training') {
+    updateTraining(1 / 60);
+    renderTraining();
+    _renderVoiceFeedback();
   } else {
     render();
   }

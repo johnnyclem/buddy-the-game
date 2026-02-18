@@ -27,8 +27,10 @@ function hideStartButton() {
 }
 
 function beginRun() {
-  state.mode = 'play';
-  state.tick = 0;
+  state.mode     = 'play';
+  state.tick     = 0;
+  state.levelWon = false;
+  state.player.treatTimer = 0;
   createWorld(Date.now());
   hideStartButton();
   document.getElementById('hud').style.opacity = '1';

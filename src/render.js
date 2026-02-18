@@ -320,12 +320,17 @@ function _renderGame() {
 
   ctx.restore();
 
-  // ── Score ─────────────────────────────────────────────────────────────────
+  // ── Score + Level ────────────────────────────────────────────────────────
   ctx.textAlign    = 'right';
   ctx.textBaseline = 'top';
   ctx.font         = '11px "Press Start 2P"';
   ctx.fillStyle    = '#ffd23f';
   ctx.fillText('BONES: ' + state.score, W - 12, 10);
+
+  ctx.textAlign    = 'left';
+  ctx.fillStyle    = 'rgba(255,255,255,0.7)';
+  ctx.font         = '9px "Press Start 2P"';
+  ctx.fillText('LVL ' + state.level, 12, 10);
 
   // ── Treat power-up bar ────────────────────────────────────────────────────
   const p2 = state.player;
@@ -365,17 +370,52 @@ function _renderGameOver() {
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
 
-  ctx.fillStyle = '#ffffff';
-  ctx.font      = '36px "Press Start 2P"';
-  ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 40);
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
 
-  ctx.font      = '12px "Press Start 2P"';
-  ctx.fillStyle = '#ffd23f';
-  ctx.fillText('BONES COLLECTED: ' + state.score, canvas.width / 2, canvas.height / 2 + 8);
+  if (state.levelWon) {
+    // All commands unlocked — victory screen
+    ctx.fillStyle = '#ffd23f';
+    ctx.font      = '28px "Press Start 2P"';
+    ctx.fillText('LEVEL ' + state.level + ' COMPLETE!', cx, cy - 60);
 
-  ctx.font      = '11px "Press Start 2P"';
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.fillText('PRESS ENTER TO PLAY AGAIN', canvas.width / 2, canvas.height / 2 + 52);
+    ctx.fillStyle = '#ffffff';
+    ctx.font      = '14px "Press Start 2P"';
+    ctx.fillText('ALL TRICKS LEARNED!', cx, cy - 20);
+
+    _drawBuddy(cx - 30, cy + 10, true, 0, 2.0, true);
+
+    ctx.font      = '12px "Press Start 2P"';
+    ctx.fillStyle = '#ffd23f';
+    ctx.fillText('BONES: ' + state.score, cx, cy + 90);
+
+    ctx.font      = '10px "Press Start 2P"';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText('PRESS ENTER TO KEEP PLAYING', cx, cy + 120);
+  } else {
+    // Death
+    ctx.fillStyle = '#ffffff';
+    ctx.font      = '36px "Press Start 2P"';
+    ctx.fillText('GAME OVER', cx, cy - 50);
+
+    ctx.font      = '11px "Press Start 2P"';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('LEVEL ' + state.level, cx, cy - 10);
+
+    ctx.font      = '12px "Press Start 2P"';
+    ctx.fillStyle = '#ffd23f';
+    ctx.fillText('BONES COLLECTED: ' + state.score, cx, cy + 20);
+
+    if (state.unlockedCommands.length > 1) {
+      ctx.font      = '8px "Press Start 2P"';
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillText('TRICKS: ' + state.unlockedCommands.length + '/' + (UNLOCK_ORDER.length + 1), cx, cy + 50);
+    }
+
+    ctx.font      = '11px "Press Start 2P"';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText('PRESS ENTER TO TRY AGAIN', cx, cy + 80);
+  }
 }
 
 // ── Voice feedback overlay ────────────────────────────────────────────────────
@@ -426,7 +466,15 @@ function _renderVoiceFeedback() {
 // ── HUD ───────────────────────────────────────────────────────────────────────
 
 function _renderHud() {
-  document.getElementById('hud').textContent = 'Mode: ' + state.mode;
+  const hud = document.getElementById('hud');
+  if (state.mode === 'play') {
+    const cmds = state.unlockedCommands.map(c =>
+      (COMMAND_DISPLAY_NAMES && COMMAND_DISPLAY_NAMES[c]) || c
+    );
+    hud.textContent = 'Tricks: ' + cmds.join(', ');
+  } else {
+    hud.textContent = '';
+  }
 }
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────

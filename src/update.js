@@ -179,8 +179,19 @@ function _checkGoal() {
   const f = state.world.flag;
   const p = state.player;
   if (!f.collected && _overlaps(p, { x: f.x, y: f.y, w: 20, h: 96 })) {
-    f.collected = true;
-    state.mode  = 'over';
+    f.collected    = true;
+    state.levelWon = true;
+
+    // Determine which command to unlock next
+    const nextUnlockIdx = state.level - 1; // level 1 beat = unlock index 0
+    if (nextUnlockIdx < UNLOCK_ORDER.length) {
+      const nextCmd = UNLOCK_ORDER[nextUnlockIdx];
+      state.unlockedCommands.push(nextCmd);
+      startTraining(nextCmd);
+    } else {
+      // All commands unlocked — just show win screen
+      state.mode = 'over';
+    }
   }
 }
 

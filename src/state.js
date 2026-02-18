@@ -55,4 +55,25 @@ const state = {
     enabled:   false,
     gamma:     0,   // degrees — negative = tilted left, positive = tilted right
   },
+
+  // Level progression
+  level: 1,          // current level number (starts at 1)
+  levelWon: false,   // true when flag reached (distinguishes win from death)
+
+  // Unlockable voice commands — earned by beating levels
+  // "get_treat" is always available; others unlock one per level beaten
+  unlockedCommands: ['get_treat'],
+
+  // Training mini-game state
+  training: {
+    active:      false,
+    command:     '',      // command being trained (e.g. 'come')
+    successes:   0,       // consecutive successful obeys (need 3)
+    phase:       'intro', // 'intro' | 'waiting' | 'reacting' | 'done'
+    reactTimer:  0,       // ticks remaining for reaction display
+    obeyed:      false,   // did Buddy obey on this attempt?
+    buddyAnim:   0,       // animation frame for close-up Buddy
+    buddyAnimTimer: 0,
+    promptTimer: 0,       // countdown before command prompt appears
+  },
 };
