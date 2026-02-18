@@ -1,10 +1,14 @@
 // Game logic — called once per frame during 'play' mode
 // dt: delta time in seconds (fixed at 1/60)
 
-const GRAVITY   = 1400;  // px/s²
-const MOVE_SPD  = 220;   // px/s horizontal
-const JUMP_SPD  = 560;   // px/s initial vertical velocity
-const SIT_TICKS = 36;    // frames Buddy stays sitting after command
+const GRAVITY      = 1400;  // px/s²
+const MOVE_SPD     = 220;   // px/s horizontal (normal)
+const JUMP_SPD     = 560;   // px/s initial vertical velocity (normal)
+const SIT_TICKS    = 36;    // frames Buddy stays sitting after command
+
+const TREAT_MOVE   = 400;   // px/s while hopped up on treats
+const TREAT_JUMP   = 740;   // px/s jump while on treats
+const TREAT_TICKS  = 420;   // 7 seconds at 60fps
 
 function update(dt) {
   applyTiltInput(); // map device orientation → state.input before game logic
@@ -22,11 +26,20 @@ function update(dt) {
 // ── Player ────────────────────────────────────────────────────────────────────
 
 function _updatePlayer(dt) {
-  const p    = state.player;
-  const inp  = state.input;
+  const p   = state.player;
+  const inp = state.input;
+
+  // Treat timer countdown
+  if (p.treatTimer > 0) p.treatTimer--;
+
+  const hasTreat = p.treatTimer > 0;
+  const movSpd   = hasTreat ? TREAT_MOVE : MOVE_SPD;
+  const jumpSpd  = hasTreat ? TREAT_JUMP : JUMP_SPD;
+  const maxJumps = hasTreat ? 2 : 1;
 
   // ── Sit command ──────────────────────────────────────────────────────────
-  if (inp.sit && p.onGround) {
+  if (inp.sit && p.onGround && !hasTreat) {
+    // Treats make Buddy too hyper to sit
     p.sitting  = true;
     p.sitTimer = SIT_TICKS;
     inp.sit    = false;
@@ -38,31 +51,32 @@ function _updatePlayer(dt) {
 
   if (p.sitting) {
     p.vx = 0;
-    // still apply gravity so Buddy doesn't float
     p.vy += GRAVITY * dt;
     _resolveCollisions(p, dt);
-    _animateSit(p, dt);
+    p.animFrame = 3;
     return;
   }
 
   // ── Horizontal movement ──────────────────────────────────────────────────
   if (inp.left) {
-    p.vx          = -MOVE_SPD;
+    p.vx          = -movSpd;
     p.facingRight = false;
   } else if (inp.right) {
-    p.vx          = MOVE_SPD;
+    p.vx          = movSpd;
     p.facingRight = true;
   } else {
-    // friction
     p.vx *= 0.78;
     if (Math.abs(p.vx) < 4) p.vx = 0;
   }
 
-  // ── Jump (edge-triggered) ────────────────────────────────────────────────
-  if (inp.jump && !p.jumpPressed && p.onGround) {
-    p.vy         = -JUMP_SPD;
-    p.onGround   = false;
-    p.jumpPressed = true;
+  // ── Jump (edge-triggered, supports double-jump) ──────────────────────────
+  if (inp.jump && !p.jumpPressed) {
+    if (p.jumpsLeft > 0) {
+      p.vy          = -jumpSpd;
+      p.onGround    = false;
+      p.jumpsLeft--;
+      p.jumpPressed = true;
+    }
   }
   if (!inp.jump) {
     p.jumpPressed = false;
@@ -74,13 +88,20 @@ function _updatePlayer(dt) {
   // ── Move + collide ───────────────────────────────────────────────────────
   _resolveCollisions(p, dt);
 
+  // Restore jumps when landing (resolve sets onGround)
+  if (p.onGround) p.jumpsLeft = maxJumps;
+
   // ── Clamp to left edge ───────────────────────────────────────────────────
   if (p.x < 0) { p.x = 0; p.vx = 0; }
 
-  // ── Fell off bottom — game over ──────────────────────────────────────────
-  if (p.y > 640) {
+  // ── Fell off bottom — game over (treats make Buddy invincible) ───────────
+  if (p.y > 640 && !hasTreat) {
     state.mode = 'over';
     return;
+  } else if (p.y > 640 && hasTreat) {
+    // bounce back up instead
+    p.y  = 630;
+    p.vy = -TREAT_JUMP * 0.6;
   }
 
   // ── Animate ─────────────────────────────────────────────────────────────
@@ -107,12 +128,10 @@ function _resolveCollisions(p, dt) {
   for (const plat of platforms) {
     if (_overlaps(p, plat)) {
       if (p.vy >= 0) {
-        // landing on top
         p.y        = plat.y - p.h;
         p.vy       = 0;
         p.onGround = true;
       } else {
-        // hitting underside
         p.y  = plat.y + plat.h;
         p.vy = 0;
       }
@@ -139,10 +158,19 @@ function _updateCamera() {
 
 function _checkCollectibles() {
   const p = state.player;
+
   for (const bone of state.world.bones) {
     if (!bone.collected && _overlaps(p, bone)) {
       bone.collected = true;
       state.score++;
+    }
+  }
+
+  for (const treat of state.world.treats) {
+    if (!treat.collected && _overlaps(p, treat)) {
+      treat.collected    = true;
+      p.treatTimer       = TREAT_TICKS;
+      p.jumpsLeft        = 2; // immediately grant double-jump
     }
   }
 }
@@ -152,7 +180,7 @@ function _checkGoal() {
   const p = state.player;
   if (!f.collected && _overlaps(p, { x: f.x, y: f.y, w: 20, h: 96 })) {
     f.collected = true;
-    state.mode  = 'over'; // TODO: proper win screen
+    state.mode  = 'over';
   }
 }
 
@@ -165,15 +193,11 @@ function _animateRun(p, dt) {
   }
   if (Math.abs(p.vx) > 10) {
     p.animTimer += dt;
-    if (p.animTimer > 0.12) {
+    if (p.animTimer > (p.treatTimer > 0 ? 0.07 : 0.12)) {
       p.animTimer = 0;
-      p.animFrame = (p.animFrame + 1) % 2; // alternate run frames
+      p.animFrame = (p.animFrame + 1) % 2;
     }
   } else {
     p.animFrame = 0; // idle
   }
-}
-
-function _animateSit(p, dt) {
-  p.animFrame = 3;
 }

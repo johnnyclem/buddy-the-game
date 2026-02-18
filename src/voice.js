@@ -1,19 +1,23 @@
 // Voice command recognition — Buddy has selective hearing
 // Uses the Web Speech API (SpeechRecognition / webkitSpeechRecognition)
+//
+// Commands must include "buddy" somewhere in the phrase:
+//   "buddy jump", "jump buddy", "hey buddy fetch", etc.
 
 // ── Keyword tables ───────────────────────────────────────────────────────────
 const VOICE_COMMANDS = {
   jump:  ['jump', 'hop', 'leap', 'up', 'hup', 'bounce'],
-  left:  ['left', 'come', 'here', 'heel', 'this way', 'come here', 'over here'],
-  right: ['right', 'fetch', 'go', 'that way', 'go get it', 'go on'],
+  left:  ['come', 'here', 'heel', 'this way', 'come here', 'over here', 'left'],
+  right: ['fetch', 'go', 'that way', 'go get it', 'go on', 'right'],
   sit:   ['sit', 'stay', 'stop', 'wait', 'down', 'no', 'bad boy', 'bad dog'],
 };
 
-// Buddy listens about 2/3 of the time — just like a real dog
+// Buddy listens about 2/3 of the time — unless he has a treat
 const OBEDIENCE_RATE = 0.68;
 
-const GOOD_BOY_REPLIES = ['Woof!', 'OK!', '*tail wag*', 'Arf!', 'BARK!', 'Yip!'];
-const IGNORE_REPLIES   = ['...', '*sniff*', '*yawn*', '?', '*looks away*', '*chases tail*'];
+const GOOD_BOY_REPLIES  = ['Woof!', 'OK!', '*tail wag*', 'Arf!', 'BARK!', 'Yip!'];
+const HYPER_REPLIES     = ['WOOF!!', 'YES YES YES!', '*zooom*', 'ARF ARF ARF!', 'LETS GO!!'];
+const IGNORE_REPLIES    = ['...', '*sniff*', '*yawn*', '?', '*looks away*', '*chases tail*'];
 
 // ── Internal state ───────────────────────────────────────────────────────────
 let _recognition = null;
@@ -45,7 +49,6 @@ function initVoice() {
   };
 
   _recognition.onerror = (event) => {
-    // 'no-speech' is normal silence — ignore it
     if (event.error === 'not-allowed') {
       state.voice.active = false;
       _syncMicButton();
@@ -83,8 +86,10 @@ function toggleVoice() {
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 function _handleVoiceCommand(transcript) {
-  let matched = null;
+  // Must say "buddy" somewhere in the phrase
+  if (!transcript.includes('buddy')) return;
 
+  let matched = null;
   for (const [cmd, keywords] of Object.entries(VOICE_COMMANDS)) {
     if (keywords.some((kw) => transcript.includes(kw))) {
       matched = cmd;
@@ -92,38 +97,52 @@ function _handleVoiceCommand(transcript) {
     }
   }
 
-  if (!matched) return; // unrecognised phrase — Buddy ignores silently
+  if (!matched) return;
 
-  const listens = Math.random() < OBEDIENCE_RATE;
+  const hasTreat = state.player.treatTimer > 0;
+
+  // With a treat Buddy always obeys; otherwise ~68% chance
+  const listens = hasTreat || Math.random() < OBEDIENCE_RATE;
 
   if (listens) {
-    _applyCommand(matched);
-    _setReaction(GOOD_BOY_REPLIES[Math.floor(Math.random() * GOOD_BOY_REPLIES.length)]);
+    _applyCommand(matched, hasTreat);
+    const pool = hasTreat ? HYPER_REPLIES : GOOD_BOY_REPLIES;
+    _setReaction(pool[Math.floor(Math.random() * pool.length)]);
   } else {
     _setReaction(IGNORE_REPLIES[Math.floor(Math.random() * IGNORE_REPLIES.length)]);
   }
 }
 
-function _applyCommand(cmd) {
+function _applyCommand(cmd, hasTreat) {
+  const duration = hasTreat ? 1400 : 900; // treat = longer movement burst
+
   if (cmd === 'jump') {
+    // Trigger jump — if in air and has treat, allow mid-air jump too
     state.input.jump = true;
     setTimeout(() => { state.input.jump = false; }, 120);
 
   } else if (cmd === 'left') {
     state.input.left  = true;
     state.input.right = false;
-    setTimeout(() => { state.input.left = false; }, 900);
+    setTimeout(() => { state.input.left = false; }, duration);
 
   } else if (cmd === 'right') {
     state.input.right = true;
     state.input.left  = false;
-    setTimeout(() => { state.input.right = false; }, 900);
+    setTimeout(() => { state.input.right = false; }, duration);
 
   } else if (cmd === 'sit') {
-    state.input.left  = false;
-    state.input.right = false;
-    state.input.sit   = true;
-    setTimeout(() => { state.input.sit = false; }, 600);
+    if (hasTreat) {
+      // Too hyped to sit — jump instead!
+      state.input.jump = true;
+      setTimeout(() => { state.input.jump = false; }, 120);
+      _setReaction('TOO HYPER TO SIT!!');
+    } else {
+      state.input.left  = false;
+      state.input.right = false;
+      state.input.sit   = true;
+      setTimeout(() => { state.input.sit = false; }, 600);
+    }
   }
 }
 

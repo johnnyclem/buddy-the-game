@@ -47,10 +47,23 @@ function createWorld(seed) {
     });
   }
 
+  // Treats (power-ups) — one every ~5 platforms, on the ground between gaps
+  const treats = [];
+  for (let i = 2; i < platforms.length; i += 5) {
+    const p = platforms[i];
+    treats.push({
+      x: p.x + p.w / 2,
+      y: p.y - 24,
+      w: 18,
+      h: 18,
+      collected: false,
+    });
+  }
+
   // Goal flag at end of level
   const flag = { x: levelWidth - 80, y: GROUND_Y - 96, collected: false };
 
-  state.world = { seed, platforms, bones, flag, width: levelWidth };
+  state.world = { seed, platforms, bones, treats, flag, width: levelWidth };
   state.score = 0;
 
   // Reset player to start position

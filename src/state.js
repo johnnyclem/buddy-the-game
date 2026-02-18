@@ -20,10 +20,13 @@ const state = {
     onGround: false,
     facingRight: true,
     sitting: false,
-    sitTimer: 0,  // ticks remaining in sit
-    jumpPressed: false,  // edge detection for jump
+    sitTimer: 0,    // ticks remaining in sit
+    jumpPressed: false,  // edge detection — only jump on fresh press
+    jumpsLeft: 1,   // 1 normally, 2 with treat (double-jump)
     animFrame: 0,
     animTimer: 0,
+    // Treat power-up
+    treatTimer: 0,  // ticks remaining of treat effect (0 = no treat)
   },
 
   // Camera offset (horizontal scroll)

@@ -47,7 +47,7 @@ function _renderMenu() {
   ctx.fillText("BUDDY'S QUEST", canvas.width / 2, canvas.height / 2 - 56);
 
   // Buddy on the title screen (centred, larger)
-  _drawBuddy(canvas.width / 2 - 24, canvas.height / 2 - 10, true, 0, 1.6);
+  _drawBuddy(canvas.width / 2 - 24, canvas.height / 2 - 10, true, 0, 1.6, false);
 
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   ctx.font      = '11px "Press Start 2P"';
@@ -97,13 +97,35 @@ function _renderGame() {
     if (!bone.collected) _drawBone(bone.x, bone.y);
   }
 
+  // ── Treats ────────────────────────────────────────────────────────────────
+  for (const treat of state.world.treats) {
+    if (!treat.collected) _drawTreat(treat.x, treat.y);
+  }
+
   // ── Flag ──────────────────────────────────────────────────────────────────
   const f = state.world.flag;
   if (!f.collected) _drawFlag(f.x, f.y);
 
   // ── Buddy ─────────────────────────────────────────────────────────────────
   const p = state.player;
-  _drawBuddy(p.x, p.y, p.facingRight, p.animFrame, 1.0);
+  const hasTreat = p.treatTimer > 0;
+  // Treat mode: bigger (1.4x), glowing
+  if (hasTreat) {
+    // Glow aura — pulse with treatTimer
+    const pulse = 0.55 + 0.45 * Math.sin(state.tick * 0.18);
+    ctx.save();
+    ctx.globalAlpha = pulse * 0.55;
+    ctx.fillStyle = '#ffd23f';
+    // Draw glow ellipse behind Buddy
+    ctx.beginPath();
+    ctx.ellipse(
+      p.x + 28, p.y + 22,
+      38, 28, 0, 0, Math.PI * 2
+    );
+    ctx.fill();
+    ctx.restore();
+  }
+  _drawBuddy(p.x, p.y, p.facingRight, p.animFrame, hasTreat ? 1.4 : 1.0, hasTreat);
 
   ctx.restore();
 
@@ -113,6 +135,36 @@ function _renderGame() {
   ctx.font         = '11px "Press Start 2P"';
   ctx.fillStyle    = '#ffd23f';
   ctx.fillText('BONES: ' + state.score, W - 12, 10);
+
+  // ── Treat power-up bar ────────────────────────────────────────────────────
+  const p2 = state.player;
+  if (p2.treatTimer > 0) {
+    const barW    = 160;
+    const barH    = 12;
+    const barX    = W / 2 - barW / 2;
+    const barY    = 10;
+    const fill    = p2.treatTimer / 420; // TREAT_TICKS
+    // Flashing when low
+    const flash   = p2.treatTimer < 90 ? (Math.sin(state.tick * 0.4) > 0) : true;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+
+    if (flash) {
+      ctx.fillStyle = '#ffd23f';
+      ctx.fillRect(barX, barY, barW * fill, barH);
+    }
+
+    ctx.strokeStyle = '#ffd23f';
+    ctx.lineWidth   = 2;
+    ctx.strokeRect(barX - 2, barY - 2, barW + 4, barH + 4);
+
+    ctx.fillStyle    = '#000';
+    ctx.font         = '7px "Press Start 2P"';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('TREAT!', W / 2, barY + 1);
+  }
 }
 
 function _renderGameOver() {
@@ -221,6 +273,54 @@ function _drawPlatform(plat) {
   }
 }
 
+function _drawTreat(x, y) {
+  // Bouncing star-shaped treat — yellow with sparkle
+  const bob  = Math.sin(state.tick * 0.1) * 4;
+  const spin = state.tick * 0.05;
+  const tx   = Math.round(x);
+  const ty   = Math.round(y + bob);
+
+  ctx.save();
+  ctx.translate(tx, ty);
+  ctx.rotate(spin);
+
+  // Outer glow
+  ctx.globalAlpha = 0.35 + 0.25 * Math.sin(state.tick * 0.15);
+  ctx.fillStyle   = '#ffd23f';
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a  = (i / 8) * Math.PI * 2;
+    const r  = i % 2 === 0 ? 14 : 8;
+    const px = Math.cos(a) * r;
+    const py = Math.sin(a) * r;
+    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // Inner treat
+  ctx.globalAlpha = 1;
+  ctx.fillStyle   = '#ffd23f';
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a  = (i / 8) * Math.PI * 2;
+    const r  = i % 2 === 0 ? 9 : 5;
+    const px = Math.cos(a) * r;
+    const py = Math.sin(a) * r;
+    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // Centre dot
+  ctx.fillStyle = '#c8860a';
+  ctx.beginPath();
+  ctx.arc(0, 0, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 function _drawBone(x, y) {
   // Bobbing animation using tick
   const bob = Math.sin(state.tick * 0.08) * 3;
@@ -271,8 +371,14 @@ function _drawFlag(x, y) {
 // Buddy the dog — pixel-art drawn with canvas rects
 // scale: 1.0 for gameplay, 1.6 for title screen
 // animFrame: 0=idle, 1=run-b, 2=jump, 3=sit
-function _drawBuddy(x, y, facingRight, animFrame, scale) {
+// hasTreat: renders cuter treat-mode version
+function _drawBuddy(x, y, facingRight, animFrame, scale, hasTreat) {
   ctx.save();
+
+  // Treat mode: slightly warmer fur, bigger, cuter
+  const fur     = hasTreat ? '#ddb97e' : '#c8a96e';
+  const darkFur = hasTreat ? '#b08040' : '#a0784a';
+  const belly   = hasTreat ? '#f0d8a0' : '#e8c88e';
 
   // Flip horizontally when facing left
   if (!facingRight) {
@@ -289,90 +395,112 @@ function _drawBuddy(x, y, facingRight, animFrame, scale) {
 
   if (animFrame === 3) {
     // ── Sitting Buddy ──────────────────────────────────────────────────────
-    // Body (crouched lower)
-    ctx.fillStyle = '#c8a96e'; // golden fur
+    ctx.fillStyle = fur;
     r(8, 14, 24, 18);
-    // Head
     r(14, 2, 18, 16);
-    // Ear left
-    ctx.fillStyle = '#a0784a';
+    ctx.fillStyle = darkFur;
     r(12, 0, 7, 10);
-    // Ear right
     r(22, 0, 7, 10);
     // Eyes
     ctx.fillStyle = '#1a1a2e';
     r(17, 6, 3, 3);
     r(24, 6, 3, 3);
+    // Shine
+    ctx.fillStyle = '#ffffff';
+    r(18, 6, 1, 1);
+    r(25, 6, 1, 1);
     // Nose
     ctx.fillStyle = '#3d1a00';
     r(20, 12, 5, 3);
     // Tongue
-    ctx.fillStyle = '#e05';
+    ctx.fillStyle = '#ee0055';
     r(21, 15, 4, 3);
-    // Front legs (tucked)
-    ctx.fillStyle = '#c8a96e';
+    ctx.fillStyle = fur;
     r(10, 28, 6, 4);
     r(24, 28, 6, 4);
-    // Tail
-    ctx.fillStyle = '#a0784a';
+    ctx.fillStyle = darkFur;
     r(30, 18, 6, 6);
     r(34, 14, 6, 6);
     r(36, 10, 5, 6);
   } else {
     // ── Standing / running / jumping Buddy ────────────────────────────────
-    // Body
-    ctx.fillStyle = '#c8a96e';
+    ctx.fillStyle = fur;
     r(6, 12, 28, 16);
-    // Belly patch
-    ctx.fillStyle = '#e8c88e';
+    ctx.fillStyle = belly;
     r(10, 16, 18, 8);
-    // Head
-    ctx.fillStyle = '#c8a96e';
+    ctx.fillStyle = fur;
     r(14, 0, 18, 16);
-    // Ear left
-    ctx.fillStyle = '#a0784a';
+    ctx.fillStyle = darkFur;
     r(12, -2, 7, 10);
-    // Ear right
     r(22, -2, 7, 10);
-    // Eyes
-    ctx.fillStyle = '#1a1a2e';
-    r(17, 4, 3, 3);
-    r(24, 4, 3, 3);
-    // Eye shine
-    ctx.fillStyle = '#ffffff';
-    r(18, 4, 1, 1);
-    r(25, 4, 1, 1);
+
+    // Eyes — bigger + sparklier with treat
+    if (hasTreat) {
+      ctx.fillStyle = '#1a1a2e';
+      r(16, 3, 5, 5);
+      r(23, 3, 5, 5);
+      ctx.fillStyle = '#ffffff';
+      r(17, 3, 2, 2);
+      r(24, 3, 2, 2);
+      // Star shine
+      ctx.fillStyle = '#ffd23f';
+      r(19, 4, 1, 1);
+      r(26, 4, 1, 1);
+      // Rosy cheeks
+      ctx.fillStyle = 'rgba(255,100,100,0.45)';
+      r(14, 9, 4, 3);
+      r(25, 9, 4, 3);
+    } else {
+      ctx.fillStyle = '#1a1a2e';
+      r(17, 4, 3, 3);
+      r(24, 4, 3, 3);
+      ctx.fillStyle = '#ffffff';
+      r(18, 4, 1, 1);
+      r(25, 4, 1, 1);
+    }
+
     // Nose
     ctx.fillStyle = '#3d1a00';
     r(20, 11, 5, 3);
-    // Tail (wag during run)
-    const tailWag = animFrame === 1 ? -3 : 0;
-    ctx.fillStyle = '#a0784a';
-    r(32, 10 + tailWag, 7, 7);
-    r(36, 6 + tailWag, 5, 6);
 
-    // Legs depend on animFrame
-    ctx.fillStyle = '#c8a96e';
-    const darkLeg = '#a0784a';
+    // Tail — fast wag with treat
+    const wagSpeed = hasTreat ? Math.sin(state.tick * 0.4) * 5 : (animFrame === 1 ? -3 : 0);
+    ctx.fillStyle = darkFur;
+    r(32, 10 + wagSpeed, 7, 7);
+    r(36, 6 + wagSpeed, 5, 6);
+
+    // Legs
+    ctx.fillStyle = fur;
     if (animFrame === 0) {
-      // Idle — legs straight down
       r(10, 26, 6, 6);
       r(18, 26, 6, 6);
       r(24, 26, 6, 6);
     } else if (animFrame === 1) {
-      // Run A
       r(8,  26, 6, 8);
       r(20, 24, 6, 6);
-      ctx.fillStyle = darkLeg;
+      ctx.fillStyle = darkFur;
       r(16, 26, 6, 8);
       r(28, 24, 6, 6);
     } else if (animFrame === 2) {
-      // Jump — legs tucked
       r(8,  22, 6, 6);
       r(26, 22, 6, 6);
-      ctx.fillStyle = darkLeg;
+      ctx.fillStyle = darkFur;
       r(14, 24, 6, 5);
       r(20, 24, 6, 5);
+    }
+
+    // Treat mode: little heart above Buddy's head
+    if (hasTreat) {
+      const heartBob = Math.sin(state.tick * 0.12) * 3;
+      ctx.fillStyle  = '#ff4488';
+      // Simple pixel heart above head
+      const hx = Math.round(x + 18 * s);
+      const hy = Math.round(y + (-14 + heartBob) * s);
+      const hs = Math.ceil(3 * s);
+      ctx.fillRect(hx,      hy + hs,    hs * 2, hs * 2);
+      ctx.fillRect(hx - hs, hy,         hs * 2, hs * 2);
+      ctx.fillRect(hx + hs, hy,         hs * 2, hs * 2);
+      ctx.fillRect(hx,      hy + hs * 2, hs,    hs);
     }
   }
 
