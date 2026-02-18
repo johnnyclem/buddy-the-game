@@ -24,5 +24,9 @@ startButton.addEventListener('click', () => {
 createWorld(0);
 render();
 setCanvasScale();
+initVoice();
+initTilt();
+initTouchControls();
+initMobileUI();
 gameLoop();
 showStartButton('Start BUDDY\'S QUEST');

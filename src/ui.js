@@ -1,4 +1,4 @@
-// UI helpers — canvas scaling, fullscreen, start button, HUD
+// UI helpers — canvas scaling, fullscreen, start button, beginRun, mobile init
 
 function setCanvasScale() {
   const scaleX = window.innerWidth / canvas.width;
@@ -32,4 +32,25 @@ function beginRun() {
   createWorld(Date.now());
   hideStartButton();
   document.getElementById('hud').style.opacity = '1';
+}
+
+// ── Mobile UI init ────────────────────────────────────────────────────────────
+// Wires up the mic button: toggles voice recognition and (on iOS) requests
+// DeviceOrientation permission via the required user-gesture path.
+
+function initMobileUI() {
+  const micBtn = document.getElementById('mic-btn');
+  if (!micBtn) return;
+
+  micBtn.addEventListener('click', () => {
+    // iOS 13+ needs a user gesture to grant DeviceOrientation permission.
+    // Piggyback on the mic button tap so the player needs only one button.
+    if (state.tilt.supported && !state.tilt.enabled) {
+      requestTiltPermission();
+    }
+
+    if (state.voice.supported) {
+      toggleVoice();
+    }
+  });
 }
