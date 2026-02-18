@@ -18,51 +18,242 @@ function render() {
 // ── Screens ──────────────────────────────────────────────────────────────────
 
 function _renderMenu() {
-  // Sky gradient
-  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  grad.addColorStop(0, '#0a2660');
-  grad.addColorStop(1, '#163d7a');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const W = canvas.width;
+  const H = canvas.height;
+  const t = state.tick;
 
-  // Stars
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  const starSeeds = [13, 37, 71, 97, 123, 211, 333, 451, 512, 777];
-  for (const s of starSeeds) {
-    const sx = (s * 97) % canvas.width;
-    const sy = (s * 53) % (canvas.height * 0.6);
-    ctx.fillRect(sx, sy, 2, 2);
+  // ── Deep space background ─────────────────────────────────────────────────
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0,    '#010a1a');
+  grad.addColorStop(0.55, '#061a4a');
+  grad.addColorStop(1,    '#0d2a6e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Twinkling stars ───────────────────────────────────────────────────────
+  // [xFrac, yFrac, size, twinkleSpeed, phaseOffset]
+  const starDefs = [
+    [0.04, 0.06, 2, 0.055, 0.0], [0.11, 0.12, 1, 0.080, 1.2],
+    [0.18, 0.04, 2, 0.048, 2.4], [0.27, 0.19, 1, 0.092, 0.8],
+    [0.35, 0.08, 2, 0.071, 1.9], [0.44, 0.14, 1, 0.063, 3.1],
+    [0.52, 0.05, 2, 0.082, 0.4], [0.61, 0.10, 1, 0.051, 2.2],
+    [0.70, 0.07, 2, 0.089, 1.5], [0.79, 0.15, 1, 0.074, 3.7],
+    [0.88, 0.05, 2, 0.060, 0.9], [0.93, 0.17, 1, 0.078, 2.6],
+    [0.08, 0.28, 1, 0.052, 1.1], [0.22, 0.23, 2, 0.068, 3.3],
+    [0.38, 0.31, 1, 0.093, 0.6], [0.55, 0.25, 2, 0.057, 2.8],
+    [0.72, 0.29, 1, 0.084, 4.2], [0.84, 0.22, 2, 0.049, 1.7],
+    [0.96, 0.27, 1, 0.072, 3.0], [0.16, 0.38, 2, 0.061, 2.1],
+  ];
+  for (const [xf, yf, sz, spd, off] of starDefs) {
+    const alpha = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * spd + off));
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle   = '#ffffff';
+    ctx.fillRect(Math.round(xf * W), Math.round(yf * H), sz, sz);
+  }
+  ctx.globalAlpha = 1;
+
+  // ── Crescent moon ─────────────────────────────────────────────────────────
+  const moonX = Math.round(W * 0.83);
+  const moonY = Math.round(H * 0.13);
+  // Moon glow (pulsing)
+  ctx.globalAlpha = 0.12 + 0.06 * Math.sin(t * 0.028);
+  ctx.fillStyle   = '#fffde7';
+  ctx.beginPath();
+  ctx.arc(moonX, moonY, 32, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  // Moon body
+  ctx.fillStyle = '#fffde7';
+  ctx.beginPath();
+  ctx.arc(moonX, moonY, 22, 0, Math.PI * 2);
+  ctx.fill();
+  // Crescent cutout (draw sky-coloured circle offset)
+  ctx.fillStyle = '#061a4a';
+  ctx.beginPath();
+  ctx.arc(moonX + 11, moonY - 5, 18, 0, Math.PI * 2);
+  ctx.fill();
+  // Moon surface craters (pixel art dots)
+  ctx.fillStyle = 'rgba(200,190,150,0.4)';
+  ctx.fillRect(moonX - 14, moonY + 2,  4, 4);
+  ctx.fillRect(moonX - 8,  moonY + 10, 3, 3);
+  ctx.fillRect(moonX - 16, moonY - 6,  2, 2);
+
+  // ── Drifting clouds ───────────────────────────────────────────────────────
+  const cloudDefs = [
+    { x: 80,  y: 68,  w: 140, h: 36, spd: 0.22 },
+    { x: 360, y: 105, w: 108, h: 28, spd: 0.30 },
+    { x: 620, y: 52,  w: 170, h: 44, spd: 0.16 },
+    { x: 840, y: 90,  w: 124, h: 34, spd: 0.26 },
+  ];
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  for (const c of cloudDefs) {
+    const cx = ((c.x - t * c.spd) % (W + c.w) + W + c.w) % (W + c.w) - c.w;
+    ctx.fillRect(cx + c.w * 0.20, c.y + c.h * 0.40, c.w * 0.60, c.h * 0.60);
+    ctx.fillRect(cx + c.w * 0.10, c.y + c.h * 0.25, c.w * 0.40, c.h * 0.55);
+    ctx.fillRect(cx + c.w * 0.45, c.y,               c.w * 0.40, c.h * 0.60);
+    ctx.fillRect(cx,               c.y + c.h * 0.40, c.w,        c.h * 0.60);
   }
 
+  // ── Silhouette hills (background layer) ───────────────────────────────────
+  const groundY = Math.round(H * 0.77);
+  const hillDefs = [
+    { cx: 0.06, r: 75 }, { cx: 0.22, r: 105 }, { cx: 0.40, r: 88 },
+    { cx: 0.57, r: 115 },{ cx: 0.74, r: 92  }, { cx: 0.91, r: 80 },
+  ];
+  ctx.fillStyle = '#0b2060';
+  for (const h of hillDefs) {
+    ctx.beginPath();
+    ctx.arc(h.cx * W, groundY + 2, h.r, Math.PI, 0);
+    ctx.fill();
+  }
+
+  // ── Ground strip (grass + dirt) ───────────────────────────────────────────
+  // Grass
+  ctx.fillStyle = '#1d9632';
+  ctx.fillRect(0, groundY, W, 8);
+  ctx.fillStyle = '#16751f';
+  ctx.fillRect(0, groundY + 8, W, 4);
+  // Dirt body
+  ctx.fillStyle = '#6b3f1e';
+  ctx.fillRect(0, groundY + 12, W, H - groundY);
+  // Dirt accent stripe
+  ctx.fillStyle = '#4e2c12';
+  ctx.fillRect(0, groundY + 22, W, 4);
+  // Scrolling vertical tile seams
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  const tileW   = 32;
+  const tileOff = Math.floor(t * 0.7) % tileW;
+  for (let tx = -tileOff; tx < W; tx += tileW) {
+    ctx.fillRect(tx, groundY + 12, 1, H - groundY);
+  }
+  // Small pixel grass tufts
+  ctx.fillStyle = '#2ab83e';
+  const tuftSeeds = [40, 112, 188, 265, 342, 430, 510, 598, 680, 760, 840, 920];
+  for (const ts of tuftSeeds) {
+    ctx.fillRect(ts, groundY - 3, 4, 3);
+    ctx.fillRect(ts + 6, groundY - 2, 3, 2);
+  }
+
+  // ── Buddy running along the ground ────────────────────────────────────────
+  const buddyScale  = 1.5;
+  const buddyH      = Math.ceil(32 * buddyScale);
+  const buddyPeriod = 320;
+  const buddyPhase  = (t % buddyPeriod) / buddyPeriod;         // 0 → 1
+  const buddyFrac   = buddyPhase < 0.5
+    ? buddyPhase * 2            // 0 → 1 (running right)
+    : 2 - buddyPhase * 2;       // 1 → 0 (running left)
+  const buddyFacing = buddyPhase < 0.5;
+  const buddyRunX   = Math.round(W * 0.07 + buddyFrac * W * 0.82);
+  const buddyRunY   = groundY - buddyH;
+  const buddyAnim   = Math.floor(t / 7) % 2 === 0 ? 0 : 1;
+  _drawBuddy(buddyRunX, buddyRunY, buddyFacing, buddyAnim, buddyScale, false);
+
+  // "WOOF!" speech bubble — pops up periodically
+  const woofCycle = t % 200;
+  if (woofCycle > 155 && woofCycle < 195) {
+    const bx = buddyRunX + (buddyFacing ? 10 : -70);
+    const by = buddyRunY - 28;
+    ctx.fillStyle   = '#ffffff';
+    ctx.fillRect(bx, by, 66, 22);
+    ctx.fillStyle   = '#000000';
+    ctx.font        = '8px "Press Start 2P"';
+    ctx.textAlign   = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('WOOF!', bx + 6, by + 7);
+    // Little speech triangle
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    if (buddyFacing) {
+      ctx.moveTo(bx + 6,  by + 22);
+      ctx.lineTo(bx + 16, by + 22);
+      ctx.lineTo(bx + 6,  by + 30);
+    } else {
+      ctx.moveTo(bx + 50, by + 22);
+      ctx.lineTo(bx + 60, by + 22);
+      ctx.lineTo(bx + 60, by + 30);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // ── Decorative floating bones ─────────────────────────────────────────────
+  const boneY = H * 0.51;
+  _drawBone(W * 0.10, boneY + Math.sin(t * 0.055) * 7);
+  _drawBone(W * 0.90, boneY + Math.sin(t * 0.055 + Math.PI) * 7);
+
+  // ── Title text — "BUDDY'S QUEST" ──────────────────────────────────────────
+  const titleY = Math.round(H * 0.20 + Math.sin(t * 0.038) * 3);
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
+  ctx.font         = '38px "Press Start 2P"';
 
-  // Title shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.4)';
-  ctx.font      = '36px "Press Start 2P"';
-  ctx.fillText("BUDDY'S QUEST", canvas.width / 2 + 3, canvas.height / 2 - 53);
+  // Chunky 8-bit multi-layer shadow
+  ctx.fillStyle = '#00004a';
+  ctx.fillText("BUDDY'S QUEST", W / 2 + 5, titleY + 5);
+  ctx.fillStyle = '#000080';
+  ctx.fillText("BUDDY'S QUEST", W / 2 + 3, titleY + 3);
 
-  // Title
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText("BUDDY'S QUEST", canvas.width / 2, canvas.height / 2 - 56);
+  // Shimmer: cycles warm-gold ↔ bright-white ↔ amber
+  const shimmer  = (Math.sin(t * 0.042) + 1) / 2;          // 0 → 1
+  const shimmerR = 255;
+  const shimmerG = Math.round(195 + shimmer * 60);
+  const shimmerB = Math.round(shimmer * 60);
+  ctx.fillStyle  = `rgb(${shimmerR},${shimmerG},${shimmerB})`;
+  ctx.fillText("BUDDY'S QUEST", W / 2, titleY);
 
-  // Buddy on the title screen (centred, larger)
-  _drawBuddy(canvas.width / 2 - 24, canvas.height / 2 - 10, true, 0, 1.6, false);
+  // Subtle outline to pop against any background
+  ctx.strokeStyle = 'rgba(0,0,60,0.5)';
+  ctx.lineWidth   = 1;
+  ctx.strokeText("BUDDY'S QUEST", W / 2, titleY);
 
-  const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  // ── Subtitle ──────────────────────────────────────────────────────────────
   ctx.font      = '11px "Press Start 2P"';
-  ctx.fillStyle = '#ffd23f';
+  ctx.fillStyle = `rgba(140,200,255,${0.6 + 0.2 * Math.sin(t * 0.05)})`;
+  ctx.fillText('A GOOD BOY ADVENTURE', W / 2, titleY + 42);
 
+  // ── Prompt text (blinking) ────────────────────────────────────────────────
+  const isMobile     = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const blinkVisible = t % 64 < 44;   // on for ~44 frames, off for ~20
+
+  ctx.font = '11px "Press Start 2P"';
+  if (blinkVisible) {
+    ctx.fillStyle = '#ffd23f';
+    if (isMobile) {
+      ctx.fillText('TAP START  OR  SAY "JUMP BUDDY"', W / 2, H * 0.905);
+    } else {
+      ctx.fillText('PRESS ENTER OR CLICK START', W / 2, H * 0.905);
+    }
+  }
+  ctx.font      = '9px "Press Start 2P"';
+  ctx.fillStyle = 'rgba(255,255,255,0.50)';
   if (isMobile) {
-    ctx.fillText('TAP START  OR  SAY "JUMP BUDDY"', canvas.width / 2, canvas.height / 2 + 72);
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font      = '9px "Press Start 2P"';
-    ctx.fillText('TILT DEVICE TO MOVE', canvas.width / 2, canvas.height / 2 + 104);
+    ctx.fillText('TILT DEVICE TO MOVE', W / 2, H * 0.955);
   } else {
-    ctx.fillText('PRESS ENTER OR CLICK START', canvas.width / 2, canvas.height / 2 + 72);
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    ctx.font      = '9px "Press Start 2P"';
-    ctx.fillText('ARROWS / WASD + SPACE TO PLAY', canvas.width / 2, canvas.height / 2 + 104);
+    ctx.fillText('ARROWS / WASD + SPACE TO PLAY', W / 2, H * 0.955);
+  }
+
+  // ── 8-bit pixel border frame ──────────────────────────────────────────────
+  const borderAlpha = 0.65 + 0.35 * Math.sin(t * 0.05);
+  ctx.strokeStyle = `rgba(255,210,63,${borderAlpha})`;
+  ctx.lineWidth   = 4;
+  ctx.strokeRect(4, 4, W - 8, H - 8);
+  // Corner squares
+  ctx.fillStyle = `rgba(255,210,63,${borderAlpha})`;
+  const cs = 10;
+  ctx.fillRect(4,       4,       cs, cs);
+  ctx.fillRect(W-4-cs,  4,       cs, cs);
+  ctx.fillRect(4,       H-4-cs,  cs, cs);
+  ctx.fillRect(W-4-cs,  H-4-cs,  cs, cs);
+  // Mid-edge tick marks
+  ctx.fillRect(W / 2 - cs / 2, 4,      cs, 4);
+  ctx.fillRect(W / 2 - cs / 2, H - 8,  cs, 4);
+  ctx.fillRect(4,      H / 2 - cs / 2, 4, cs);
+  ctx.fillRect(W - 8,  H / 2 - cs / 2, 4, cs);
+
+  // ── CRT scanline overlay ──────────────────────────────────────────────────
+  ctx.fillStyle = 'rgba(0,0,0,0.07)';
+  for (let sy = 0; sy < H; sy += 3) {
+    ctx.fillRect(0, sy, W, 1);
   }
 }
 
