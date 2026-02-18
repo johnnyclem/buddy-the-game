@@ -1,0 +1,98 @@
+{
+  "origin": "top-left, +x right, +y down",
+  "mode": "play",
+  "world": 4,
+  "worldName": "Cathedral of the Potion",
+  "score": 0,
+  "lives": 2,
+  "rescued": false,
+  "player": {
+    "x": 2165,
+    "y": 435,
+    "vx": 300,
+    "vy": 0,
+    "onGround": true,
+    "facing": 1,
+    "autoRun": false,
+    "idleTimer": 0,
+    "headbuttCd": 0
+  },
+  "boss": {
+    "x": 1756.5,
+    "y": 260,
+    "hp": 8,
+    "maxHp": 8,
+    "alive": true
+  },
+  "soundtrack": {
+    "worldTrack": 3,
+    "beat": 1.63,
+    "phrase": 1,
+    "cue": "FISHY BASS",
+    "cueTimer": 0.03
+  },
+  "audio": {
+    "musicEnabled": true,
+    "hasAudio": true
+  },
+  "cameraX": 1240,
+  "entities": [
+    {
+      "type": "enemy",
+      "x": 1227,
+      "y": 313,
+      "w": 28,
+      "h": 26
+    },
+    {
+      "type": "enemy",
+      "x": 1692.0833333333333,
+      "y": 216,
+      "w": 28,
+      "h": 26
+    },
+    {
+      "type": "boss",
+      "x": 1756.5,
+      "y": 260,
+      "w": 88,
+      "h": 84,
+      "hp": 8
+    },
+    {
+      "type": "platform",
+      "x": 1120,
+      "y": 242,
+      "w": 220,
+      "h": 22
+    },
+    {
+      "type": "platform",
+      "x": 1420,
+      "y": 300,
+      "w": 210,
+      "h": 22
+    },
+    {
+      "type": "platform",
+      "x": 1700,
+      "y": 248,
+      "w": 160,
+      "h": 22
+    },
+    {
+      "type": "platform",
+      "x": 1940,
+      "y": 205,
+      "w": 160,
+      "h": 22
+    },
+    {
+      "type": "platform",
+      "x": 0,
+      "y": 470,
+      "w": 2200,
+      "h": 120
+    }
+  ]
+}

@@ -29,6 +29,43 @@ Original prompt: make a black and white derpy corgi who is the main character go
     - Added `updateSoundtrack(dt)` in gameplay loop and `clearPressed()` once per frame so `keyPressed` is one-shot again.
     - Added soundtrack HUD overlay and included `soundtrack` payload in `renderGameToText`.
     - Boss HP bar now scales off `boss.maxHp`.
-  - Updated play-test validation: ran Playwright with custom action script including `e` (head-butt) and auto-run traversal actions.
-  - Validation output observed in `output/web-game/state-0.json` through `state-2.json` (menu->world transitions/rescue + combat states), with no `errors-*.json` generated.
-  - Next suggested pass: add a short boss-fight-focused action script to confirm stomps/head-butt can reduce `boss.hp` and drive win state deterministically.
+- Updated play-test validation: ran Playwright with custom action script including `e` (head-butt) and auto-run traversal actions.
+- Validation output observed in `output/web-game/state-0.json` through `state-2.json` (menu->world transitions/rescue + combat states), with no `errors-*.json` generated.
+- Next suggested pass: add a short boss-fight-focused action script to confirm stomps/head-butt can reduce `boss.hp` and drive win state deterministically.
+
+- 2026-02-18: added temporary graphics pass and temporary procedural audio:
+  - Added lightweight noir/SNES visual layer to `drawBackground`, stronger platform tile shading, and more character silhouettes.
+  - Upgraded Buddy and Evil Cat renderers to look like more distinctive 16-bit sprites (ears/eyes/facial details, cat horns/eyes, boss glow).
+  - Added an in-code Web Audio engine with music loop and SFX:
+    - jump/double-jump
+    - head-butt
+    - stomp / breakable smash
+    - enemy and boss hits
+    - cat shots, rescue, hurt, and victory stabs
+    - temporary looping boss/world-themed music tracks
+  - Added small audio hooks and state exposure in `render_game_to_text` (`audio` block) for automation visibility.
+  - Wired audio startup on game start and cleaned up music on win/game-over transitions.
+  - Added a few debug-safe guards + warnings so missing AudioContext never blocks gameplay.
+  - `node --check game.js` passes.
+
+- 2026-02-18: verified and published.
+  - Ran Playwright verification loop with local server at `http://127.0.0.1:5173`.
+  - Screenshot and state capture artifacts generated at `output/test-deploy/shot-*.png` and `output/test-deploy/state-*.json`.
+  - No `errors-*.json` logs reported by the client.
+  - Render state confirms audio running: `audio.musicEnabled = true`, `audio.hasAudio = true`.
+  - Published preview to Vercel: `https://buddy-the-game-hy6z2aw8s-johnnyclems-projects.vercel.app`.
+  - Existing production deployment still present and unchanged: `https://buddy-the-game-dpqnznx7h-johnnyclems-projects.vercel.app`.
+
+- 2026-02-18 (Pipe & Vapor edge repro/repair):
+  - Confirmed user-reported stuck behavior in Pipe & Vapor was due one-sided auto-run math in `updateWorldCollisionAndMovement`.
+  - In deployed `Pipe & Vapor District` state, `ArrowLeft` still pushed Buddy right when `autoRun` was active.
+  - Patch applied in `game.js`:
+    - `state.autoRun` now applies asymmetric input:
+      - no input -> `desiredVx = RUN_SPEED`
+      - hold left -> `desiredVx = -WALK_SPEED`
+      - hold right -> `desiredVx = RUN_SPEED + 40`
+  - Production re-deployed to `https://buddy-the-game.vercel.app`.
+  - Playwright probe confirms left-input now moves backward in Pipe & Vapor:
+    - `L { frame:0, x:598.7, vx:-80, autoRun:true }` then accelerates to `vx:-300` at frame 16
+    - `gate { frame:20, x:2268.7, vx:-299.9, autoRun:true }`
+  - No JS errors logged in this repro loop.

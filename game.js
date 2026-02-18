@@ -30,6 +30,32 @@ const HEAD_BUTT_SCORE = 90;
 const BOSS_HIT_SCORE = 120;
 const BOSS_ATTACK_INTERVAL = 1.05;
 const BOSS_MAX_HP = 8;
+const MUSIC_LEVELS = [
+  {
+    interval: 0.32,
+    bass: 82,
+    melody: [146, 174, 196, 220, 196, 174, 164, 196],
+    ambience: 0.045,
+  },
+  {
+    interval: 0.28,
+    bass: 95,
+    melody: [175, 196, 220, 262, 220, 196, 208, 233],
+    ambience: 0.05,
+  },
+  {
+    interval: 0.26,
+    bass: 55,
+    melody: [174, 196, 233, 196, 174, 156, 196, 220],
+    ambience: 0.055,
+  },
+  {
+    interval: 0.24,
+    bass: 73,
+    melody: [196, 220, 233, 261, 233, 220, 196, 174],
+    ambience: 0.048,
+  },
+];
 
 const SOUNDTRACK_TRACKS = [
   {
@@ -217,9 +243,219 @@ const keyState = {
 
 const keyPressed = new Set();
 
+const audioEngine = {
+  ctx: null,
+  master: null,
+  sfxBus: null,
+  musicBus: null,
+  musicTimer: 0,
+  musicStep: 0,
+  musicEnabled: false,
+};
+
 function setPressed(code) {
   keyState[code] = true;
   keyPressed.add(code);
+}
+
+function initAudioEngine() {
+  if (audioEngine.ctx) return true;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return false;
+  try {
+    const ctx = new Ctx();
+    const master = ctx.createGain();
+    const sfxBus = ctx.createGain();
+    const musicBus = ctx.createGain();
+    master.gain.value = 0.9;
+    sfxBus.gain.value = 0.6;
+    musicBus.gain.value = 0.3;
+
+    sfxBus.connect(master);
+    musicBus.connect(master);
+    master.connect(ctx.destination);
+
+    audioEngine.ctx = ctx;
+    audioEngine.master = master;
+    audioEngine.sfxBus = sfxBus;
+    audioEngine.musicBus = musicBus;
+    return true;
+  } catch (error) {
+    console.warn('Audio init failed:', error.message);
+    return false;
+  }
+}
+
+function primeAudio() {
+  if (!initAudioEngine()) return;
+  if (audioEngine.ctx.state === 'suspended') {
+    audioEngine.ctx.resume().catch(() => {});
+  }
+  audioEngine.musicEnabled = true;
+}
+
+function playTone({
+  frequency = 220,
+  duration = 0.12,
+  type = 'square',
+  gain = 0.08,
+  decay = 0.06,
+  delay = 0,
+  bus = 'sfx',
+}) {
+  if (!audioEngine.ctx || !audioEngine[`${bus}Bus`]) return;
+  try {
+    const now = audioEngine.ctx.currentTime + delay;
+    const osc = audioEngine.ctx.createOscillator();
+    const g = audioEngine.ctx.createGain();
+
+    osc.type = type;
+    osc.frequency.value = frequency;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(gain, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + duration + decay);
+
+    osc.connect(g);
+    g.connect(audioEngine[`${bus}Bus`]);
+    osc.start(now);
+    osc.stop(now + duration + decay);
+  } catch (error) {
+    console.warn('SFX scheduling failed:', error.message);
+  }
+}
+
+function playNoise({duration = 0.08, gain = 0.04, bus = 'sfx'}) {
+  if (!audioEngine.ctx || !audioEngine[`${bus}Bus`]) return;
+  try {
+    const buffer = audioEngine.ctx.createBuffer(
+      1,
+      Math.max(1, Math.floor(audioEngine.ctx.sampleRate * duration)),
+      audioEngine.ctx.sampleRate,
+    );
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.35;
+    }
+    const src = audioEngine.ctx.createBufferSource();
+    const g = audioEngine.ctx.createGain();
+    const filter = audioEngine.ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 1000;
+
+    const now = audioEngine.ctx.currentTime;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(gain, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    src.buffer = buffer;
+    src.connect(filter);
+    filter.connect(g);
+    g.connect(audioEngine[`${bus}Bus`]);
+    src.start(now);
+    src.stop(now + duration);
+  } catch (error) {
+    console.warn('Noise SFX failed:', error.message);
+  }
+}
+
+function updateMusic(dt) {
+  if (!audioEngine.musicEnabled || !audioEngine.ctx || state.mode !== 'play') return;
+  const track = MUSIC_LEVELS[state.worldIndex] || MUSIC_LEVELS[0];
+  audioEngine.musicTimer += dt;
+  const stepRate = Math.max(0.14, Math.min(0.2, track.interval * 0.85));
+  while (audioEngine.musicTimer >= stepRate) {
+    audioEngine.musicTimer -= stepRate;
+    const melody = track.melody;
+    const note = melody[audioEngine.musicStep % melody.length];
+    const octave = state.worldIndex >= 2 ? 1.02 : 0.9;
+    const drumAccent = ((audioEngine.musicStep + state.worldIndex) % 8) === 0;
+    const leadGain = state.worldIndex === 3 ? 0.055 : 0.045;
+    playTone({
+      frequency: note * octave,
+      duration: 0.18,
+      type: state.worldIndex === 3 ? 'triangle' : 'sawtooth',
+      gain: leadGain,
+      bus: 'music',
+      decay: 0.12,
+    });
+    if (drumAccent) {
+      playTone({
+        frequency: track.bass,
+        duration: 0.22,
+        type: 'square',
+        gain: track.ambience,
+        bus: 'music',
+        decay: 0.16,
+      });
+    }
+    audioEngine.musicStep += 1;
+  }
+}
+
+function triggerJumpSfx(doubleJump = false) {
+  playTone({
+    frequency: doubleJump ? 540 : 420,
+    duration: 0.11,
+    type: 'triangle',
+    gain: 0.07,
+    bus: 'sfx',
+  });
+  playTone({
+    frequency: doubleJump ? 680 : 520,
+    duration: 0.06,
+    type: 'square',
+    gain: 0.03,
+    delay: 0.03,
+    bus: 'sfx',
+  });
+}
+
+function triggerHeadButtSfx() {
+  playTone({ frequency: 150, duration: 0.07, type: 'sawtooth', gain: 0.08, bus: 'sfx' });
+  playTone({ frequency: 260, duration: 0.06, type: 'square', gain: 0.03, delay: 0.03, bus: 'sfx' });
+}
+
+function triggerEnemyStompSfx() {
+  playTone({ frequency: 320, duration: 0.07, type: 'triangle', gain: 0.06, bus: 'sfx' });
+  playNoise({ duration: 0.07, gain: 0.03 });
+}
+
+function triggerBreakSfx() {
+  playTone({ frequency: 110, duration: 0.09, type: 'square', gain: 0.09, bus: 'sfx' });
+  playNoise({ duration: 0.08, gain: 0.04 });
+}
+
+function triggerBossHitSfx() {
+  playTone({ frequency: 720, duration: 0.09, type: 'triangle', gain: 0.08, bus: 'sfx' });
+  playTone({ frequency: 420, duration: 0.14, type: 'sawtooth', gain: 0.05, delay: 0.03, bus: 'sfx' });
+}
+
+function triggerRescueSfx() {
+  playTone({ frequency: 500, duration: 0.08, type: 'triangle', gain: 0.07, bus: 'sfx' });
+  playTone({ frequency: 660, duration: 0.08, type: 'triangle', gain: 0.06, delay: 0.08, bus: 'sfx' });
+}
+
+function triggerHurtSfx() {
+  playTone({ frequency: 130, duration: 0.12, type: 'sawtooth', gain: 0.09, bus: 'sfx' });
+  playNoise({ duration: 0.09, gain: 0.04 });
+}
+
+function triggerPoopSfx() {
+  playNoise({ duration: 0.11, gain: 0.03, bus: 'sfx' });
+}
+
+function triggerBossShotSfx() {
+  playTone({ frequency: 220, duration: 0.12, type: 'triangle', gain: 0.05, bus: 'sfx', decay: 0.09 });
+}
+
+function triggerVictorySfx() {
+  [260, 293, 349, 392, 523].forEach((note, index) => {
+    playTone({ frequency: note, duration: 0.12, type: 'triangle', gain: 0.06, delay: index * 0.08, bus: 'sfx' });
+  });
+}
+
+function stopMusic() {
+  audioEngine.musicEnabled = false;
 }
 
 function clearPressed() {
@@ -251,6 +487,7 @@ const state = {
   dialogue: null,
   dialogueTime: 0,
   cameraX: 0,
+  time: 0,
   player: {
     x: 150,
     y: 280,
@@ -288,7 +525,7 @@ function createWorld(index) {
   state.worldIndex = index;
   state.worldName = b.name;
   state.platforms = b.platforms.map((p) => ({ ...p }));
-  state.platforms.push({ x: 0, y: FLOOR_Y, w: b.length, h: 120 });
+  state.platforms.push({ x: 0, y: FLOOR_Y, w: b.length, h: 120, isGround: true });
   state.breakables = b.breakables.map((p) => ({ ...p, hp: p.hp }));
   state.enemies = b.enemies.map((e) => ({ ...e }));
 
@@ -312,6 +549,8 @@ function createWorld(index) {
   state.soundtrack.beat = 0;
   state.soundtrack.cue = '';
   state.soundtrack.cueTimer = 0;
+  audioEngine.musicStep = index * 3;
+  audioEngine.musicTimer = 0;
   const track = SOUNDTRACK_TRACKS[state.soundtrack.worldTrack] || SOUNDTRACK_TRACKS[0];
   setSoundtrackCue(`${track.title}: ${track.vibe}`, 1.2);
 }
@@ -334,11 +573,15 @@ function resetPlayerAndRun() {
 function beginRun() {
   createWorld(0);
   resetPlayerAndRun();
+  primeAudio();
   state.mode = 'play';
   state.score = 0;
   state.lives = 3;
   state.rescued = false;
   state.vfx = [];
+  state.time = 0;
+  audioEngine.musicStep = 0;
+  audioEngine.musicTimer = 0;
   state.dialogue = {
     text: 'Buddy: "BARK! Another hero. No. Another corgi emergency."',
     t: 2.2,
@@ -425,12 +668,14 @@ function damagePlayer(source = 'snare', amount = 1, sourceX = null) {
   state.player.vy = -360;
   state.player.facing = hitFromLeft ? 1 : -1;
   state.player.onGround = false;
+  triggerHurtSfx();
   say('BUDDY: "GRRRRL! That still hurts!"', '#ff4f4f', 1.6);
   setSoundtrackCue('SFX: CRUNCH ON BONES', 0.45);
   if (state.lives <= 0) {
     state.mode = 'gameover';
     say('Mission interrupted. Buddy needs a nap.', '#ff8e8e', 999);
     showStartButton('Try Again');
+    stopMusic();
   }
 }
 
@@ -438,10 +683,12 @@ function gainRescue() {
   state.rescueTaken = true;
   state.rescued = true;
   state.score += 500;
+  triggerRescueSfx();
   say('Rescue corgi: "ARF! Thank you, Buddy!"', '#9ef39e', 2.8);
 }
 
 function makePoop() {
+  triggerPoopSfx();
   state.vfx.push({
     type: 'poop',
     x: state.player.x + PLAYER_W / 2 - 10,
@@ -474,6 +721,7 @@ function headButtRequest() {
 }
 
 function doHeadButt(direction) {
+  triggerHeadButtSfx();
   let struck = false;
   say('BUDDY: "OOOH YEAH!"', '#ffda8a', 1.1);
   setSoundtrackCue('SFX: COACH-STYLE BUMPER', 0.45);
@@ -492,6 +740,7 @@ function doHeadButt(direction) {
     if (wall.hp <= 0) {
       state.breakables.splice(i, 1);
       state.score += 30;
+      triggerBreakSfx();
       state.vfx.push({ type: 'break', x: wall.x, y: wall.y, w: wall.w, h: wall.h, t: 0.45 });
       say('BUDDY: "Wall says bye-bye."', '#d6bd7b', 1.2);
       state.player.vx += direction * 45;
@@ -509,6 +758,7 @@ function doHeadButt(direction) {
     state.vfx.push({ type: 'impact', x: enemy.x, y: enemy.y, w: enemy.w, h: enemy.h, t: 0.35 });
     if (enemy.hp <= 0) {
       state.enemies.splice(i, 1);
+      triggerEnemyStompSfx();
       state.vfx.push({ type: 'dust', x: enemy.x, y: enemy.y + enemy.h, w: enemy.w, h: 6, t: 0.5 });
       say('BUDDY: "BARK! Too close, buddy."', '#d6f6d0', 0.9);
       state.score += HEAD_BUTT_SCORE;
@@ -521,6 +771,7 @@ function doHeadButt(direction) {
 
   if (!struck && state.boss && state.boss.hp > 0 && intersects(hitLine, state.boss)) {
     state.boss.hp -= BOSS_HEADBUTT_DAMAGE;
+    triggerBossHitSfx();
     state.boss.invuln = HEADBUTT_BOSS_INVULN;
     state.score += HEAD_BUTT_SCORE;
     if (state.boss.hp < 0) state.boss.hp = 0;
@@ -541,7 +792,7 @@ function applyHorizontalCollision(entity) {
     h: PLAYER_H,
   };
 
-  for (const solid of [...state.platforms, ...state.breakables]) {
+  for (const solid of [...state.platforms.filter((p) => !p.isGround), ...state.breakables]) {
     if (!intersects(playerRect, solid)) continue;
     if (entity.vx > 0) {
       playerRect.x = solid.x - PLAYER_W;
@@ -602,9 +853,12 @@ function updateWorldCollisionAndMovement(dt) {
   let desiredVx = 0;
 
   if (state.autoRun) {
-    desiredVx = RUN_SPEED;
-    if (move) {
-      desiredVx += move * 40;
+    if (move < 0) {
+      desiredVx = -WALK_SPEED;
+    } else if (move > 0) {
+      desiredVx = RUN_SPEED + 40;
+    } else {
+      desiredVx = RUN_SPEED;
     }
   } else {
     desiredVx = move * WALK_SPEED;
@@ -620,10 +874,12 @@ function updateWorldCollisionAndMovement(dt) {
       state.player.vy = JUMP_VELOCITY;
       state.player.onGround = false;
       state.player.doubleJumped = false;
+      triggerJumpSfx(false);
       say('BUDDY: "ARF!"', '#f7f4e3', 0.8);
     } else if (!state.player.doubleJumped) {
       state.player.vy = DOUBLE_JUMP_VELOCITY;
       state.player.doubleJumped = true;
+      triggerJumpSfx(true);
       say('BUDDY: "WOOF! Double trouble."', '#f7f4e3', 0.8);
     }
   }
@@ -708,6 +964,7 @@ function updateEnemies(dt) {
         state.player.vy = ENEMY_STOMP_BOUNCE;
         e.hp = (e.hp || 1) - 1;
         state.score += STOMP_SCORE;
+        triggerEnemyStompSfx();
         say('BUDDY: "BARK! That\'s the way."', '#f0f0aa', 1);
         if (e.hp <= 0) {
           state.enemies.splice(i, 1);
@@ -746,6 +1003,7 @@ function updateBoss(dt) {
       state.player.vy = ENEMY_STOMP_BOUNCE;
       state.score += BOSS_HIT_SCORE;
       boss.hp -= BOSS_HEADBUTT_DAMAGE;
+      triggerBossHitSfx();
       boss.invuln = HEADBUTT_BOSS_INVULN;
       say('BUDDY: "GRRRRL! Catnip is not for him!"', '#ffca75', 1.2);
       setSoundtrackCue('SFX: CATFUSE CHUNK', 0.8);
@@ -757,6 +1015,7 @@ function updateBoss(dt) {
   boss.shootTimer -= dt;
   if (boss.shootTimer <= 0 && boss.hp > 0) {
     boss.shootTimer = BOSS_ATTACK_INTERVAL;
+    triggerBossShotSfx();
     const dir = state.player.x >= boss.x ? 1 : -1;
     state.bossBullets.push({
       x: boss.x + boss.w / 2,
@@ -823,6 +1082,8 @@ function updateDialogue(dt) {
 function update(dt) {
   if (state.mode !== 'play') return;
 
+  state.time += dt;
+  updateMusic(dt);
   updateSoundtrack(dt);
   updateWorldCollisionAndMovement(dt);
   updateEnemies(dt);
@@ -834,9 +1095,11 @@ function update(dt) {
   if (state.boss && state.boss.hp <= 0 && state.worldIndex === 3) {
     state.mode = 'win';
     state.vfx.push({ type: 'victory', x: state.player.x + 10, y: state.player.y - 40, w: 24, h: 16, t: 2.5 });
+    triggerVictorySfx();
     say('EVIL CAT: "NO! My potion formula!"', '#f2b4b4', 2.8);
     say('BUDDY: "You lost, fishy tyrant."', '#9ef3a2', 3);
     showStartButton('Play Again');
+    stopMusic();
   }
 
   clearPressed();
@@ -849,12 +1112,44 @@ function drawBackground(world, sx) {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, WORLD_VIEW_WIDTH, WORLD_VIEW_HEIGHT);
 
-  for (let i = -1; i < 8; i++) {
-    const x = ((i * 310) - (sx * 0.13) % 310);
-    ctx.fillStyle = world.palette.mid;
-    ctx.fillRect(x, WORLD_VIEW_HEIGHT - 188, 320, 38);
+  for (let i = -2; i < 18; i++) {
+    const x = ((i * 210) - (sx * 0.10) % 210);
+    const height = 84 + ((i * 37) % 56);
+    const hOff = 18 + ((i * 11) % 22);
+    const skylineY = WORLD_VIEW_HEIGHT - 190 - hOff;
     ctx.fillStyle = world.palette.mid2;
-    ctx.fillRect(x + 20, WORLD_VIEW_HEIGHT - 220, 280, 20);
+    ctx.fillRect(x, skylineY, 206, 24 + ((i * 13) % 20));
+    ctx.fillStyle = world.palette.mid;
+    ctx.fillRect(x + 8, skylineY + 4, 190, 6 + ((i * 19) % 16));
+
+    for (let j = 0; j < 8; j++) {
+      if ((i + j) % 3 === 0) {
+        const w = 12 + ((i + j) % 4);
+        const h = 6 + (((i * 2 + j) % 4));
+        const wx = x + 18 + ((j * 23) % 150);
+        const wy = WORLD_VIEW_HEIGHT - 182 - (hOff % 12);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillRect(wx, wy, w, h);
+      }
+    }
+
+    const glow = ((sx * 0.03 + i * 17) % WORLD_VIEW_WIDTH) / WORLD_VIEW_WIDTH;
+    if (glow > 0.15 && glow < 0.45) {
+      const tx = x + 52;
+      const ty = skylineY - height * 0.33;
+      ctx.fillStyle = `rgba(250, 225, 150, ${0.05 + (glow * 0.06)})`;
+      ctx.fillRect(tx, ty, 14, height * 0.5);
+      ctx.fillRect(tx + 4, ty + 2, 4, 2);
+    }
+
+    if (world.palette.accent) {
+      const poleX = x + 158;
+      const poleY = skylineY - height;
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(poleX, poleY, 4, height + 4);
+      ctx.fillStyle = world.palette.accent;
+      ctx.fillRect(poleX - 4, poleY + 16, 12, 8);
+    }
   }
 
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
@@ -863,6 +1158,39 @@ function drawBackground(world, sx) {
     ctx.fillRect(x, 26 + ((i * 17) % 9), 1, 1);
     ctx.fillRect(x, 78 + ((i * 23) % 5), 1, 1);
   }
+
+  if (state.worldIndex === 1) {
+    for (let i = -1; i < 10; i++) {
+      const x = ((i * 270) - (sx * 0.28) % 270) + 42;
+      const radius = 17 + ((i * 4) % 8);
+      ctx.strokeStyle = 'rgba(210, 190, 150, 0.16)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(x + 20, WORLD_VIEW_HEIGHT - 196, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(80, 80, 80, 0.22)';
+      ctx.fillRect(x, WORLD_VIEW_HEIGHT - 190, 44, 14);
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.fillRect(x + 10, WORLD_VIEW_HEIGHT - 188, 2, 8);
+      ctx.fillRect(x + 22, WORLD_VIEW_HEIGHT - 188, 2, 8);
+    }
+  }
+
+  if (state.worldIndex === 3) {
+    const haloX = WORLD_VIEW_WIDTH / 2 - (sx * 0.03) % 260;
+    for (let i = 0; i < 3; i++) {
+      const x = ((haloX + i * 180) % (WORLD_VIEW_WIDTH + 200)) - 120;
+      ctx.fillStyle = 'rgba(70, 45, 35, 0.25)';
+      ctx.beginPath();
+      ctx.moveTo(x, WORLD_VIEW_HEIGHT - 200);
+      ctx.lineTo(x + 88, WORLD_VIEW_HEIGHT - 130);
+      ctx.lineTo(x + 172, WORLD_VIEW_HEIGHT - 200);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 215, 130, 0.12)';
+      ctx.fillRect(x + 54, WORLD_VIEW_HEIGHT - 166, 44, 6);
+    }
+  }
 }
 
 function drawPlatforms() {
@@ -870,10 +1198,21 @@ function drawPlatforms() {
 
   state.platforms.forEach((p) => {
     const x = p.x - state.cameraX;
+    const shimmer = (Math.sin((x + state.time) * 0.03) + 1) / 2;
+    const shade = Math.round(2 + shimmer * 8);
+    const edge = shade.toString(16).padStart(2, '0');
+    const shadeColor = `#${edge}${edge}${edge}`;
+
     ctx.fillStyle = world.palette.floor;
     ctx.fillRect(x, p.y, p.w, p.h);
+    ctx.fillStyle = shadeColor;
+    ctx.fillRect(x + 4, p.y + 3, p.w - 8, 2);
     ctx.fillStyle = 'rgba(255,255,255,0.04)';
     ctx.fillRect(x, p.y, p.w, 4);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(x, p.y + p.h - 3, p.w, 3);
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.strokeRect(x, p.y, p.w, p.h);
   });
 
   state.breakables.forEach((w) => {
@@ -898,23 +1237,42 @@ function drawPlatforms() {
 }
 
 function drawCorgi(x, y, w, h, palette) {
+  const pawWobble = Math.sin(state.time * 4 + x * 0.05) * 1;
+
   ctx.fillStyle = palette.body;
-  ctx.fillRect(x + 2, y + 7, w - 4, h - 12);
+  ctx.fillRect(x + 1, y + 6, w - 2, h - 12);
   ctx.fillStyle = palette.bodyDark;
-  ctx.fillRect(x + 2, y + h - 10, w - 4, 8);
+  ctx.fillRect(x + 1, y + h - 10, w - 2, 8);
+  ctx.fillStyle = palette.body;
+  ctx.fillRect(x + 10, y + 6, w - 20, 7);
+
   ctx.fillStyle = palette.face;
-  ctx.fillRect(x + 7, y + 9, w - 16, h - 20);
+  ctx.fillRect(x + 8, y + 10, w - 16, h - 22);
 
   ctx.fillStyle = palette.ear;
   ctx.fillRect(x + 1, y + 2, 8, 8);
   ctx.fillRect(x + w - 9, y + 2, 8, 8);
+  ctx.fillRect(x + 2, y + 2 + pawWobble, 4, 2);
+  ctx.fillRect(x + w - 6, y + 2 - pawWobble, 4, 2);
 
   ctx.fillStyle = '#111';
   ctx.fillRect(x + 4, y + 11, 3, 2);
   ctx.fillRect(x + w - 7, y + 11, 3, 2);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(x + 9 + (pawWobble > 0 ? 0.5 : 0), y + 18, 4, 3);
+  ctx.fillRect(x + w - 13 - (pawWobble > 0 ? 0.5 : 0), y + 18, 4, 3);
 
   ctx.fillStyle = palette.collar || '#fff';
-  ctx.fillRect(x + 6, y + h - 6, w - 12, 3);
+  ctx.fillRect(x + 6, y + h - 7, w - 12, 3);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillRect(x + w - 20, y + 20, 3, 2);
+  ctx.fillRect(x + 14, y + 20, 3, 2);
+
+  if (palette.tail) {
+    ctx.fillStyle = palette.tail;
+    ctx.fillRect(x - 2, y + 16 + pawWobble, 5, 8);
+  }
 }
 
 function drawHero() {
@@ -926,6 +1284,7 @@ function drawHero() {
     face: '#f6f3eb',
     ear: '#101010',
     collar: '#3f3f3f',
+    tail: '#2a2a2a',
   };
 
   drawCorgi(x, y, PLAYER_W, PLAYER_H, bodyPalette);
@@ -957,14 +1316,41 @@ function drawBoss() {
 
   const x = state.boss.x - state.cameraX;
   const y = state.boss.y;
+  const pulse = 1 + Math.sin(state.time * 6 + state.boss.x * 0.015) * 0.02;
 
   const color = state.player.invuln > 0 ? '#5f4b40' : '#111';
+  const eyes = state.player.invuln > 0 ? '#d9b57d' : '#ffe8b8';
   ctx.fillStyle = color;
   ctx.fillRect(x, y, state.boss.w, state.boss.h);
+  for (let i = 0; i < 5; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${0.05 + i * 0.02})`;
+    ctx.fillRect(x + 3 + i * 5, y + 8, state.boss.w - 6 - i * 8, 2);
+  }
 
   ctx.fillStyle = '#d2a76e';
   ctx.fillRect(x + 10, y + 8, 14, 8);
   ctx.fillRect(x + state.boss.w - 24, y + 8, 14, 8);
+  ctx.fillRect(x + state.boss.w / 2 - 7, y + 5, 14, 6);
+
+  ctx.fillStyle = eyes;
+  ctx.fillRect(x + 16, y + 22, 6, 4);
+  ctx.fillRect(x + state.boss.w - 23, y + 22, 6, 4);
+
+  ctx.fillStyle = '#2f2f2f';
+  ctx.beginPath();
+  ctx.moveTo(x + 8, y + 42);
+  ctx.lineTo(x + 22, y + 42 + 6 * pulse);
+  ctx.lineTo(x + 44, y + 42);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#2f2f2f';
+  ctx.beginPath();
+  ctx.moveTo(x + state.boss.w - 8, y + 42);
+  ctx.lineTo(x + state.boss.w - 22, y + 42 + 6 * pulse);
+  ctx.lineTo(x + state.boss.w - 44, y + 42);
+  ctx.closePath();
+  ctx.fill();
 
   ctx.fillStyle = '#fff';
   ctx.fillRect(x + state.boss.w / 2 - 12, y + 24, 24, 12);
@@ -991,17 +1377,17 @@ function drawVfx() {
     if (fx.type === 'impact') {
       ctx.strokeStyle = '#ffd27a';
       ctx.lineWidth = 2;
-      ctx.strokeRect(x - state.cameraX, y, fx.w, fx.h);
+      ctx.strokeRect(x, y, fx.w, fx.h);
       continue;
     }
     if (fx.type === 'break') {
       ctx.fillStyle = '#7d6a4f';
-      ctx.fillRect(x - state.cameraX, y - 12, fx.w, 6);
+      ctx.fillRect(x, y - 12, fx.w, 6);
       continue;
     }
     if (fx.type === 'scratch') {
       ctx.fillStyle = '#bdbdbd';
-      ctx.fillRect(x - state.cameraX, y - 6, fx.w, 4);
+      ctx.fillRect(x, y - 6, fx.w, 4);
       continue;
     }
     if (fx.type === 'butt') {
@@ -1011,23 +1397,28 @@ function drawVfx() {
     }
     if (fx.type === 'boost') {
       ctx.fillStyle = 'rgba(255,255,255,0.25)';
-      ctx.fillRect(x - state.cameraX, y + 2, fx.w, fx.h);
+      ctx.fillRect(x, y + 2, fx.w, fx.h);
       continue;
     }
     if (fx.type === 'sawTrail') {
       ctx.fillStyle = 'rgba(255,220,170,0.2)';
-      ctx.fillRect(x - state.cameraX, y, fx.w, fx.h);
+      ctx.fillRect(x, y, fx.w, fx.h);
       continue;
     }
     if (fx.type === 'dust') {
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
       for (let i = 0; i < 6; i++) {
-        ctx.fillRect(x - state.cameraX + i * 5, y + (i % 2), 3, 3);
+        ctx.fillRect(x + i * 5, y + (i % 2), 3, 3);
       }
     }
     if (fx.type === 'victory') {
       ctx.fillStyle = '#fef6bd';
-      ctx.fillRect(x - state.cameraX, y, fx.w, fx.h);
+      ctx.fillRect(x, y, fx.w, fx.h);
+      continue;
+    }
+    if (fx.type === 'music') {
+      ctx.fillStyle = '#ffd57a';
+      ctx.fillRect(x, y, fx.w, fx.h);
     }
   }
 }
@@ -1042,6 +1433,11 @@ function drawHUD() {
 
   if (state.mode === 'play' && state.boss && state.boss.hp > 0 && state.worldIndex === 3) {
     ctx.fillText(`CAT HP: ${state.boss.hp}`, WORLD_VIEW_WIDTH - 130, 20);
+  }
+
+  if (audioEngine.musicEnabled) {
+    ctx.fillStyle = '#f9e8b8';
+    ctx.fillText('BGM: ACTIVE', WORLD_VIEW_WIDTH - 184, 60);
   }
 
   if (state.autoRun) {
@@ -1076,8 +1472,12 @@ function drawSoundtrackOverlay() {
 
 function drawBossBullets() {
   for (const b of state.bossBullets) {
+    const drift = Math.sin((state.time + b.x) * 0.15) * 1.8;
     ctx.fillStyle = '#d96b55';
     ctx.fillRect(b.x - state.cameraX, b.y, b.w, b.h);
+    ctx.fillStyle = 'rgba(255, 238, 150, 0.4)';
+    ctx.fillRect(b.x - state.cameraX - 1, b.y - 2 + drift, b.w + 2, 1);
+    ctx.fillRect(b.x - state.cameraX + 2, b.y + b.h - 1, b.w - 2, 1);
   }
 }
 
@@ -1193,6 +1593,10 @@ function renderGameToText() {
       phrase: state.soundtrack.phrase,
       cue: state.soundtrack.cue,
       cueTimer: Number(state.soundtrack.cueTimer.toFixed(2)),
+    },
+    audio: {
+      musicEnabled: audioEngine.musicEnabled,
+      hasAudio: !!audioEngine.ctx,
     },
     cameraX: Number(state.cameraX.toFixed(1)),
     entities: visibleEntities,
