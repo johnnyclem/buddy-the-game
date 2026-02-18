@@ -18,5 +18,17 @@ Original prompt: make a black and white derpy corgi who is the main character go
   - and terminal `gameover`/`win` states when triggered.
 - Known follow-up:
   - The environment’s Playwright client tool in this session lacked direct image-preview support, so visuals were validated via generated screenshot files + state JSON.
-  - `WEB_GAME_ACTIONS` does not include E-key; head-butt currently untested by automation and would benefit from a custom action payload including `e` (or temporary client mapping update for automation).
+  - `WEB_GAME_ACTIONS` now includes `e` input mapping; head-butt automation can be exercised with custom payloads.
   - `type` in `/Users/johnnyclem/.codex/skills/develop-web-game/package.json` was set to `module` to run the bundled test client in this environment.
+
+- Additional patch pass completed:
+  - Reconnected gameplay tuning hooks after prior revert:
+    - `HEAD_BUTT_COOLDOWN` and `HEAD_BUTT_IMPULSE` now drive head-butt timing/force.
+    - Enemy stomps use `ENEMY_STOMP_BOUNCE`/`STOMP_SCORE` and proper enemy damage sources.
+    - Boss contact/head-butt logic uses `BOSS_*` constants and score/iframes through `BOSS_HEADBUTT_DAMAGE`, `BOSS_HIT_SCORE`, `HEADBUTT_BOSS_INVULN`, `BOSS_ATTACK_INTERVAL`, `BOSS_BULLET_DAMAGE`, `BOSS_CONTACT_DAMAGE`.
+    - Added `updateSoundtrack(dt)` in gameplay loop and `clearPressed()` once per frame so `keyPressed` is one-shot again.
+    - Added soundtrack HUD overlay and included `soundtrack` payload in `renderGameToText`.
+    - Boss HP bar now scales off `boss.maxHp`.
+  - Updated play-test validation: ran Playwright with custom action script including `e` (head-butt) and auto-run traversal actions.
+  - Validation output observed in `output/web-game/state-0.json` through `state-2.json` (menu->world transitions/rescue + combat states), with no `errors-*.json` generated.
+  - Next suggested pass: add a short boss-fight-focused action script to confirm stomps/head-butt can reduce `boss.hp` and drive win state deterministically.

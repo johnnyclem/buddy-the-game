@@ -15,6 +15,44 @@ const RUN_SPEED = 360;
 const JUMP_VELOCITY = -620;
 const DOUBLE_JUMP_VELOCITY = -540;
 const IDLE_POOP_INTERVAL = 3;
+const ENEMY_STOMP_BOUNCE = -365;
+const ENEMY_CONTACT_DAMAGE = 1;
+const BOSS_CONTACT_DAMAGE = 1;
+const BOSS_BULLET_DAMAGE = 1;
+const BOSS_HEADBUTT_DAMAGE = 2;
+const ENEMY_HEADBUTT_DAMAGE = 2;
+const BREAKABLE_HEADBUTT_DAMAGE = 2;
+const HEAD_BUTT_COOLDOWN = 0.45;
+const HEAD_BUTT_IMPULSE = 150;
+const HEADBUTT_BOSS_INVULN = 0.55;
+const STOMP_SCORE = 65;
+const HEAD_BUTT_SCORE = 90;
+const BOSS_HIT_SCORE = 120;
+const BOSS_ATTACK_INTERVAL = 1.05;
+const BOSS_MAX_HP = 8;
+
+const SOUNDTRACK_TRACKS = [
+  {
+    title: 'Noir Alley Nocturne',
+    vibe: 'rain + throbbed bass',
+    phrases: ['DRIP DRIP DRIP', 'NEON HUM', 'SOFT METRONOME'],
+  },
+  {
+    title: 'Pipe & Vapor Transit',
+    vibe: 'steam hiss + rolling pulse',
+    phrases: ['TURBO CHARGE', 'GLASSY WHISPER', 'PIPE RUN'],
+  },
+  {
+    title: 'Static Graveyard Waltz',
+    vibe: 'low static drums',
+    phrases: ['ELECTRIC WIND', 'SOUL RADIO', 'SABOTAGE BEAT'],
+  },
+  {
+    title: 'Cathedral of Catnip',
+    vibe: 'sinister hymn in 4/4',
+    phrases: ['MEOW-MARCH', 'FISHY BASS', 'POTION DRUMS'],
+  },
+];
 
 const worldBlueprints = [
   {
@@ -151,7 +189,7 @@ const worldBlueprints = [
       y: 170,
       w: 88,
       h: 84,
-      hp: 7,
+      hp: BOSS_MAX_HP,
       minX: 1700,
       maxX: 2000,
       speed: 90,
@@ -235,6 +273,14 @@ const state = {
   bossBullets: [],
   vfx: [],
   worldName: '',
+  soundtrack: {
+    cue: '',
+    cueTimer: 0,
+    phrase: 0,
+    phraseTimer: 1.7,
+    beat: 0,
+    worldTrack: 0,
+  },
 };
 
 function createWorld(index) {
@@ -248,10 +294,26 @@ function createWorld(index) {
 
   state.rescueCorgi = b.rescue ? { ...b.rescue, taken: false, type: 'rescue' } : null;
   state.rescueTaken = false;
-  state.boss = b.boss ? { ...b.boss, hp: b.boss.hp, invuln: 0, shootTimer: b.boss.shootTimer } : null;
+  state.boss = b.boss
+    ? {
+      ...b.boss,
+      hp: b.boss.hp,
+      maxHp: b.boss.hp,
+      invuln: 0,
+      shootTimer: b.boss.shootTimer,
+    }
+    : null;
   state.bossBullets = [];
   state.autoZones = b.autoZones;
   state.worldLength = b.length;
+  state.soundtrack.worldTrack = Math.min(index, SOUNDTRACK_TRACKS.length - 1);
+  state.soundtrack.phrase = 0;
+  state.soundtrack.phraseTimer = 1.2;
+  state.soundtrack.beat = 0;
+  state.soundtrack.cue = '';
+  state.soundtrack.cueTimer = 0;
+  const track = SOUNDTRACK_TRACKS[state.soundtrack.worldTrack] || SOUNDTRACK_TRACKS[0];
+  setSoundtrackCue(`${track.title}: ${track.vibe}`, 1.2);
 }
 
 function resetPlayerAndRun() {
@@ -330,15 +392,41 @@ function say(text, color = '#f4f1dd', t = 1.8) {
   state.dialogueTime = 0;
 }
 
-function damagePlayer(source = 'snare') {
+function setSoundtrackCue(text, duration = 1.2) {
+  state.soundtrack.cue = text;
+  state.soundtrack.cueTimer = duration;
+}
+
+function updateSoundtrack(dt) {
+  const track = SOUNDTRACK_TRACKS[state.worldIndex] || SOUNDTRACK_TRACKS[0];
+  state.soundtrack.worldTrack = Math.min(state.worldIndex, SOUNDTRACK_TRACKS.length - 1);
+  state.soundtrack.beat = (state.soundtrack.beat + dt * 7.5) % 8;
+
+  state.soundtrack.phraseTimer -= dt;
+  if (state.soundtrack.phraseTimer <= 0) {
+    state.soundtrack.phraseTimer = 2.2;
+    state.soundtrack.phrase = (state.soundtrack.phrase + 1) % track.phrases.length;
+    setSoundtrackCue(track.phrases[state.soundtrack.phrase], 0.7);
+  }
+
+  if (state.soundtrack.cueTimer > 0) {
+    state.soundtrack.cueTimer -= dt;
+    if (state.soundtrack.cueTimer < 0) state.soundtrack.cueTimer = 0;
+  }
+}
+
+function damagePlayer(source = 'snare', amount = 1, sourceX = null) {
   if (state.player.invuln > 0 || state.mode !== 'play') return;
-  state.lives -= 1;
+  state.lives -= amount;
+  state.lives = Math.max(0, state.lives);
   state.player.invuln = 1.2;
-  say('BUDDY: "GRRRRL! That still hurts!"', '#ff4f4f', 1.6);
-  state.player.vx = -state.player.facing * 200;
+  const hitFromLeft = sourceX ? state.player.x + PLAYER_W / 2 < sourceX : state.player.facing > 0;
+  state.player.vx = hitFromLeft ? -260 : 260;
   state.player.vy = -360;
-  state.player.facing *= -1;
+  state.player.facing = hitFromLeft ? 1 : -1;
   state.player.onGround = false;
+  say('BUDDY: "GRRRRL! That still hurts!"', '#ff4f4f', 1.6);
+  setSoundtrackCue('SFX: CRUNCH ON BONES', 0.45);
   if (state.lives <= 0) {
     state.mode = 'gameover';
     say('Mission interrupted. Buddy needs a nap.', '#ff8e8e', 999);
@@ -388,6 +476,7 @@ function headButtRequest() {
 function doHeadButt(direction) {
   let struck = false;
   say('BUDDY: "OOOH YEAH!"', '#ffda8a', 1.1);
+  setSoundtrackCue('SFX: COACH-STYLE BUMPER', 0.45);
 
   const hitLine = rect(
     direction > 0 ? state.player.x + PLAYER_W : state.player.x - 34,
@@ -399,23 +488,44 @@ function doHeadButt(direction) {
   for (let i = state.breakables.length - 1; i >= 0; i--) {
     const wall = state.breakables[i];
     if (!intersects(hitLine, wall)) continue;
-    wall.hp -= 1;
+    wall.hp -= BREAKABLE_HEADBUTT_DAMAGE;
     if (wall.hp <= 0) {
       state.breakables.splice(i, 1);
       state.score += 30;
       state.vfx.push({ type: 'break', x: wall.x, y: wall.y, w: wall.w, h: wall.h, t: 0.45 });
       say('BUDDY: "Wall says bye-bye."', '#d6bd7b', 1.2);
+      state.player.vx += direction * 45;
       return;
     }
     state.vfx.push({ type: 'scratch', x: wall.x, y: wall.y, w: wall.w, h: wall.h, t: 0.4 });
     struck = true;
   }
 
+  for (let i = state.enemies.length - 1; i >= 0; i--) {
+    const enemy = state.enemies[i];
+    if (!intersects(hitLine, enemy)) continue;
+    enemy.hp = (enemy.hp || 1) - ENEMY_HEADBUTT_DAMAGE;
+    state.score += HEAD_BUTT_SCORE / 2;
+    state.vfx.push({ type: 'impact', x: enemy.x, y: enemy.y, w: enemy.w, h: enemy.h, t: 0.35 });
+    if (enemy.hp <= 0) {
+      state.enemies.splice(i, 1);
+      state.vfx.push({ type: 'dust', x: enemy.x, y: enemy.y + enemy.h, w: enemy.w, h: 6, t: 0.5 });
+      say('BUDDY: "BARK! Too close, buddy."', '#d6f6d0', 0.9);
+      state.score += HEAD_BUTT_SCORE;
+    } else {
+      say('BUDDY: "Head-butt check. He did a number."', '#d6bd7b', 1.0);
+    }
+    state.player.vx += direction * 35;
+    return;
+  }
+
   if (!struck && state.boss && state.boss.hp > 0 && intersects(hitLine, state.boss)) {
-    state.boss.hp -= 1;
-    state.boss.invuln = 0.45;
-    state.score += 80;
+    state.boss.hp -= BOSS_HEADBUTT_DAMAGE;
+    state.boss.invuln = HEADBUTT_BOSS_INVULN;
+    state.score += HEAD_BUTT_SCORE;
+    if (state.boss.hp < 0) state.boss.hp = 0;
     say('BUDDY: "GRRRRL! Catfuse unlocked."', '#ffd56b', 1.2);
+    setSoundtrackCue('SFX: CATFUSE CHUNK', 0.8);
     state.vfx.push({ type: 'impact', x: state.boss.x + state.boss.w / 2, y: state.boss.y + 18, w: 28, h: 18, t: 0.35 });
     return;
   }
@@ -487,7 +597,6 @@ function applyVerticalCollision(entity) {
 }
 
 function updateWorldCollisionAndMovement(dt) {
-  const world = worldBlueprints[state.worldIndex];
   state.autoRun = state.autoZones.some((zone) => state.player.x >= zone.start && state.player.x <= zone.end);
   const move = (canMoveLeft() ? -1 : 0) + (canMoveRight() ? 1 : 0);
   let desiredVx = 0;
@@ -520,9 +629,9 @@ function updateWorldCollisionAndMovement(dt) {
   }
 
   if (headButtRequest() && state.player.headbuttCd <= 0) {
-    state.player.headbuttCd = 0.52;
+    state.player.headbuttCd = HEAD_BUTT_COOLDOWN;
     doHeadButt(state.player.facing);
-    state.player.vx += state.player.facing * 90;
+    state.player.vx += state.player.facing * HEAD_BUTT_IMPULSE;
   }
 
   if (state.player.headbuttCd > 0) {
@@ -596,9 +705,9 @@ function updateEnemies(dt) {
     if (intersects(enemyRect, playerRect)) {
       const playerPrevBottom = state.player.y + PLAYER_H + state.player.vy * dt;
       if (state.player.vy > 150 && playerPrevBottom <= e.y + 8) {
-        state.player.vy = -340;
+        state.player.vy = ENEMY_STOMP_BOUNCE;
         e.hp = (e.hp || 1) - 1;
-        state.score += 60;
+        state.score += STOMP_SCORE;
         say('BUDDY: "BARK! That\'s the way."', '#f0f0aa', 1);
         if (e.hp <= 0) {
           state.enemies.splice(i, 1);
@@ -607,7 +716,7 @@ function updateEnemies(dt) {
         continue;
       }
 
-      damagePlayer('enemy');
+      damagePlayer('enemy', ENEMY_CONTACT_DAMAGE, e.x + e.w / 2);
     }
 
     if (e.type === 'sawblade') {
@@ -634,19 +743,20 @@ function updateBoss(dt) {
   const hitLine = rect(state.player.x, state.player.y, PLAYER_W, PLAYER_H);
   if (intersects(hitLine, boss) && boss.invuln <= 0) {
     if (state.player.vy > 120 && state.player.y + PLAYER_H < boss.y + 16) {
-      state.player.vy = -360;
-      state.score += 120;
-      boss.hp -= 1;
-      boss.invuln = 0.35;
+      state.player.vy = ENEMY_STOMP_BOUNCE;
+      state.score += BOSS_HIT_SCORE;
+      boss.hp -= BOSS_HEADBUTT_DAMAGE;
+      boss.invuln = HEADBUTT_BOSS_INVULN;
       say('BUDDY: "GRRRRL! Catnip is not for him!"', '#ffca75', 1.2);
+      setSoundtrackCue('SFX: CATFUSE CHUNK', 0.8);
       return;
     }
-    damagePlayer('cat');
+    damagePlayer('cat', BOSS_CONTACT_DAMAGE, boss.x + boss.w / 2);
   }
 
   boss.shootTimer -= dt;
   if (boss.shootTimer <= 0 && boss.hp > 0) {
-    boss.shootTimer = 1.1;
+    boss.shootTimer = BOSS_ATTACK_INTERVAL;
     const dir = state.player.x >= boss.x ? 1 : -1;
     state.bossBullets.push({
       x: boss.x + boss.w / 2,
@@ -667,7 +777,7 @@ function updateBoss(dt) {
     b.t -= dt;
 
     if (intersects(b, { x: state.player.x, y: state.player.y, w: PLAYER_W, h: PLAYER_H })) {
-      damagePlayer('pill');
+      damagePlayer('pill', BOSS_BULLET_DAMAGE, b.vx > 0 ? b.x : b.x + b.w);
       state.bossBullets.splice(i, 1);
       continue;
     }
@@ -713,6 +823,7 @@ function updateDialogue(dt) {
 function update(dt) {
   if (state.mode !== 'play') return;
 
+  updateSoundtrack(dt);
   updateWorldCollisionAndMovement(dt);
   updateEnemies(dt);
   updateBoss(dt);
@@ -727,6 +838,8 @@ function update(dt) {
     say('BUDDY: "You lost, fishy tyrant."', '#9ef3a2', 3);
     showStartButton('Play Again');
   }
+
+  clearPressed();
 }
 
 function drawBackground(world, sx) {
@@ -860,7 +973,7 @@ function drawBoss() {
   ctx.fillStyle = '#2a2a2a';
   ctx.fillRect(x, y - 10, hpBarW, 6);
   ctx.fillStyle = '#e24c4c';
-  ctx.fillRect(x, y - 10, (hpBarW * state.boss.hp) / 7, 6);
+  ctx.fillRect(x, y - 10, (hpBarW * (state.boss.hp / state.boss.maxHp)), 6);
 
   ctx.fillStyle = '#f5f5f5';
   ctx.fillText('Evil Cat', x + 4, y - 16);
@@ -947,6 +1060,20 @@ function drawHUD() {
   }
 }
 
+function drawSoundtrackOverlay() {
+  const track = SOUNDTRACK_TRACKS[Math.min(state.soundtrack.worldTrack, SOUNDTRACK_TRACKS.length - 1)] || SOUNDTRACK_TRACKS[0];
+  const cueText = state.soundtrack.cueTimer > 0 ? state.soundtrack.cue : track.phrases[state.soundtrack.phrase];
+  ctx.fillStyle = 'rgba(6,6,8,0.62)';
+  ctx.fillRect(WORLD_VIEW_WIDTH - 330, 4, 324, 58);
+  ctx.fillStyle = '#c7c4ab';
+  ctx.font = '11px "Press Start 2P", monospace';
+  ctx.fillText(`TRACK ${state.soundtrack.worldTrack + 1}: ${track.title}`, WORLD_VIEW_WIDTH - 320, 20);
+  ctx.fillStyle = '#f4f4d8';
+  ctx.fillText(`BEAT ${state.soundtrack.beat.toFixed(1)}`, WORLD_VIEW_WIDTH - 320, 36);
+  ctx.fillStyle = '#ffd56b';
+  ctx.fillText(cueText, WORLD_VIEW_WIDTH - 320, 52);
+}
+
 function drawBossBullets() {
   for (const b of state.bossBullets) {
     ctx.fillStyle = '#d96b55';
@@ -968,6 +1095,7 @@ function render() {
   if (state.mode === 'play') {
     hud.style.opacity = 0;
     drawHUD();
+    drawSoundtrackOverlay();
   } else {
     hud.style.opacity = 1;
     hud.textContent = `Mode: ${state.mode}`;
@@ -1056,8 +1184,16 @@ function renderGameToText() {
       x: state.boss.x,
       y: state.boss.y,
       hp: state.boss.hp,
+      maxHp: state.boss.maxHp,
       alive: state.boss.hp > 0,
     } : null,
+    soundtrack: {
+      worldTrack: state.soundtrack.worldTrack,
+      beat: Number(state.soundtrack.beat.toFixed(2)),
+      phrase: state.soundtrack.phrase,
+      cue: state.soundtrack.cue,
+      cueTimer: Number(state.soundtrack.cueTimer.toFixed(2)),
+    },
     cameraX: Number(state.cameraX.toFixed(1)),
     entities: visibleEntities,
   });
