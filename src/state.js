@@ -7,6 +7,27 @@ const state = {
   mode:  'menu', // 'menu' | 'play' | 'over'
   world: null,
   tick:  0,
+  score: 0,
+
+  // Buddy the dog — player character
+  player: {
+    x: 80,
+    y: 0,      // set on world init
+    vx: 0,
+    vy: 0,
+    w: 40,
+    h: 32,
+    onGround: false,
+    facingRight: true,
+    sitting: false,
+    sitTimer: 0,  // ticks remaining in sit
+    jumpPressed: false,  // edge detection for jump
+    animFrame: 0,
+    animTimer: 0,
+  },
+
+  // Camera offset (horizontal scroll)
+  camera: { x: 0 },
 
   // Unified input — written by keyboard, touch D-pad, voice, and tilt
   input: {
