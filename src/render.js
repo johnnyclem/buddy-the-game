@@ -134,46 +134,55 @@ function _renderMenu() {
     ctx.fillRect(ts + 6, groundY - 2, 3, 2);
   }
 
-  // ── Buddy running along the ground ────────────────────────────────────────
-  const buddyScale  = 1.5;
-  const buddyH      = Math.ceil(32 * buddyScale);
-  const buddyPeriod = 320;
-  const buddyPhase  = (t % buddyPeriod) / buddyPeriod;         // 0 → 1
-  const buddyFrac   = buddyPhase < 0.5
-    ? buddyPhase * 2            // 0 → 1 (running right)
-    : 2 - buddyPhase * 2;       // 1 → 0 (running left)
-  const buddyFacing = buddyPhase < 0.5;
-  const buddyRunX   = Math.round(W * 0.07 + buddyFrac * W * 0.82);
-  const buddyRunY   = groundY - buddyH;
-  const buddyAnim   = Math.floor(t / 7) % 2 === 0 ? 0 : 1;
-  _drawBuddy(buddyRunX, buddyRunY, buddyFacing, buddyAnim, buddyScale, false);
+  // ── Spritesheet layers (drawn between ground and UI) ──────────────────────
+  const _hasSprites = typeof hasIntroSprites === 'function' && hasIntroSprites();
+  if (typeof drawIntroSprites === 'function') {
+    drawIntroSprites(ctx, W, H, t);
+  }
 
-  // "WOOF!" speech bubble — pops up periodically
-  const woofCycle = t % 200;
-  if (woofCycle > 155 && woofCycle < 195) {
-    const bx = buddyRunX + (buddyFacing ? 10 : -70);
-    const by = buddyRunY - 28;
-    ctx.fillStyle   = '#ffffff';
-    ctx.fillRect(bx, by, 66, 22);
-    ctx.fillStyle   = '#000000';
-    ctx.font        = '8px "Press Start 2P"';
-    ctx.textAlign   = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('WOOF!', bx + 6, by + 7);
-    // Little speech triangle
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    if (buddyFacing) {
-      ctx.moveTo(bx + 6,  by + 22);
-      ctx.lineTo(bx + 16, by + 22);
-      ctx.lineTo(bx + 6,  by + 30);
-    } else {
-      ctx.moveTo(bx + 50, by + 22);
-      ctx.lineTo(bx + 60, by + 22);
-      ctx.lineTo(bx + 60, by + 30);
+  // ── Buddy running along the ground (procedural fallback) ─────────────────
+  // Skip the procedural Buddy + speech bubble when spritesheet layers are active
+  if (!_hasSprites) {
+    const buddyScale  = 1.5;
+    const buddyH      = Math.ceil(32 * buddyScale);
+    const buddyPeriod = 320;
+    const buddyPhase  = (t % buddyPeriod) / buddyPeriod;         // 0 → 1
+    const buddyFrac   = buddyPhase < 0.5
+      ? buddyPhase * 2            // 0 → 1 (running right)
+      : 2 - buddyPhase * 2;       // 1 → 0 (running left)
+    const buddyFacing = buddyPhase < 0.5;
+    const buddyRunX   = Math.round(W * 0.07 + buddyFrac * W * 0.82);
+    const buddyRunY   = groundY - buddyH;
+    const buddyAnim   = Math.floor(t / 7) % 2 === 0 ? 0 : 1;
+    _drawBuddy(buddyRunX, buddyRunY, buddyFacing, buddyAnim, buddyScale, false);
+
+    // "WOOF!" speech bubble — pops up periodically
+    const woofCycle = t % 200;
+    if (woofCycle > 155 && woofCycle < 195) {
+      const bx = buddyRunX + (buddyFacing ? 10 : -70);
+      const by = buddyRunY - 28;
+      ctx.fillStyle   = '#ffffff';
+      ctx.fillRect(bx, by, 66, 22);
+      ctx.fillStyle   = '#000000';
+      ctx.font        = '8px "Press Start 2P"';
+      ctx.textAlign   = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('WOOF!', bx + 6, by + 7);
+      // Little speech triangle
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      if (buddyFacing) {
+        ctx.moveTo(bx + 6,  by + 22);
+        ctx.lineTo(bx + 16, by + 22);
+        ctx.lineTo(bx + 6,  by + 30);
+      } else {
+        ctx.moveTo(bx + 50, by + 22);
+        ctx.lineTo(bx + 60, by + 22);
+        ctx.lineTo(bx + 60, by + 30);
+      }
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.closePath();
-    ctx.fill();
   }
 
   // ── Decorative floating bones ─────────────────────────────────────────────

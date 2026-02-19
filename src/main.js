@@ -15,6 +15,7 @@ function gameLoop() {
     renderTraining();
     _renderVoiceFeedback();
   } else {
+    state.tick++;   // advance tick for menu/game-over animations
     render();
   }
   requestAnimationFrame(gameLoop);
@@ -25,6 +26,7 @@ startButton.addEventListener('click', () => {
 });
 
 // Bootstrap
+loadIntroSprites();   // kick off async spritesheet loading (no-op if none configured)
 createWorld(0);
 render();
 setCanvasScale();
