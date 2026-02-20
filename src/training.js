@@ -2,18 +2,7 @@
 // After beating a level, the player enters training mode to learn the next command.
 // Buddy must obey the command 3x in a row (at 75% obedience rate) to learn it.
 
-// ── Pretty names for display ─────────────────────────────────────────────────
-const COMMAND_DISPLAY_NAMES = {
-  get_treat:   'GET THE TREAT',
-  come:        'COME',
-  stay:        'STAY',
-  sit_trick:   'SIT',
-  double_jump: 'DOUBLE-JUMP',
-  jump_trick:  'JUMP',
-  attack:      'ATTACK',
-  play_dead:   'PLAY DEAD',
-  fly:         'FLY',
-};
+// Pretty names defined in levels.js as COMMAND_DISPLAY_NAMES
 
 const COMMAND_PHRASES = {
   get_treat:   '"Buddy, get the treat!"',
@@ -276,7 +265,7 @@ function _finishTraining() {
   t.active = false;
   t.phase  = 'intro';
 
-  // Advance to next level
-  state.level++;
-  beginRun();
+  // Go to world map — level advancement happens in goToMap()
+  state.levelWon = true;
+  goToMap();
 }

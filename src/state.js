@@ -4,7 +4,7 @@ const ctx    = canvas.getContext('2d');
 
 // Game state — mutate properties; never reassign the object itself
 const state = {
-  mode:  'menu', // 'menu' | 'play' | 'over'
+  mode:  'menu', // 'menu' | 'map' | 'play' | 'over'
   world: null,
   tick:  0,
   score: 0,

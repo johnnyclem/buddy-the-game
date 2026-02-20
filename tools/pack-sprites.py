@@ -35,12 +35,9 @@ SRC_ROWS    = 4
 SRC_W       = 640
 SRC_H       = 1738
 
-# Frame dimensions (cropped to clean even size)
+# Output frame dimensions (every frame is resized to exactly this)
 FRAME_W     = 320   # 640 / 2 = 320 (exact)
-FRAME_H     = 434   # 1738 / 4 = 434.5, we use 434 and center-crop
-
-# Row height used for offset calculation (use 434.5 to center between frames)
-ROW_STEP    = SRC_H / SRC_ROWS  # 434.5
+FRAME_H     = 434   # uniform target height for all frames
 
 # Output layout
 OUT_COLS    = 8     # frames per row in the packed sheet (one source image per row)
@@ -48,33 +45,34 @@ OUT_COLS    = 8     # frames per row in the packed sheet (one source image per r
 # ── Processing ──────────────────────────────────────────────────────────────
 
 def extract_frames(img_path):
-    """Extract all frames from a single source spritesheet."""
+    """Extract all frames from a single source spritesheet.
+
+    Slices at exact quarter-height boundaries, then resizes each frame
+    to a uniform FRAME_W x FRAME_H so there are no sub-pixel offsets.
+    """
     img = Image.open(img_path).convert('RGBA')
     w, h = img.size
 
     if w != SRC_W or h != SRC_H:
         print(f"  WARNING: {os.path.basename(img_path)} is {w}x{h}, expected {SRC_W}x{SRC_H}")
 
+    col_w = w // SRC_COLS  # 320 — divides exactly
+
     frames = []
     for row in range(SRC_ROWS):
-        for col in range(SRC_COLS):
-            # Calculate crop box, centering within the approximate cell
-            x0 = col * FRAME_W
-            y0 = round(row * ROW_STEP + (ROW_STEP - FRAME_H) / 2)
-            x1 = x0 + FRAME_W
-            y1 = y0 + FRAME_H
+        # Slice at exact quarter boundaries (handles the 434/435 split)
+        y0 = round(row * h / SRC_ROWS)
+        y1 = round((row + 1) * h / SRC_ROWS)
 
-            # Clamp to image bounds
-            y0 = max(0, y0)
-            y1 = min(h, y1)
+        for col in range(SRC_COLS):
+            x0 = col * col_w
+            x1 = x0 + col_w
 
             frame = img.crop((x0, y0, x1, y1))
 
-            # If we got a slightly short frame due to clamping, pad it
-            if frame.size[1] < FRAME_H:
-                padded = Image.new('RGBA', (FRAME_W, FRAME_H), (0, 0, 0, 0))
-                padded.paste(frame, (0, 0))
-                frame = padded
+            # Resize to uniform dimensions (handles 434 vs 435 row heights)
+            if frame.size != (FRAME_W, FRAME_H):
+                frame = frame.resize((FRAME_W, FRAME_H), Image.LANCZOS)
 
             frames.append(frame)
 
@@ -98,34 +96,34 @@ def main():
 
     total = len(all_frames)
     print(f"\nTotal frames: {total}")
-    print(f"Frame size: {FRAME_W}x{FRAME_H}")
+    print(f"Full-res frame size: {FRAME_W}x{FRAME_H}")
+
+    # Downscale each frame individually to half-res BEFORE packing.
+    # This avoids LANCZOS bleed across frame boundaries that happens
+    # when you resize the whole packed sheet at once.
+    half_fw = FRAME_W // 2   # 160
+    half_fh = FRAME_H // 2   # 217
+    half_frames = [f.convert('RGB').resize((half_fw, half_fh), Image.LANCZOS) for f in all_frames]
 
     # Pack into a grid: OUT_COLS columns, as many rows as needed
     out_rows = (total + OUT_COLS - 1) // OUT_COLS
-    out_w = OUT_COLS * FRAME_W
-    out_h = out_rows * FRAME_H
+    out_w = OUT_COLS * half_fw
+    out_h = out_rows * half_fh
 
     print(f"Output: {out_w}x{out_h} ({OUT_COLS} cols x {out_rows} rows)")
+    print(f"Output frame size: {half_fw}x{half_fh}")
 
-    packed = Image.new('RGBA', (out_w, out_h), (0, 0, 0, 0))
+    packed = Image.new('RGB', (out_w, out_h), (0, 0, 0))
 
-    for i, frame in enumerate(all_frames):
+    for i, frame in enumerate(half_frames):
         col = i % OUT_COLS
         row = i // OUT_COLS
-        packed.paste(frame, (col * FRAME_W, row * FRAME_H))
+        packed.paste(frame, (col * half_fw, row * half_fh))
 
-    # Downscale to half-res for faster web loading (~4MB vs ~11MB)
-    half_w = out_w // 2
-    half_h = out_h // 2
-    half_fw = FRAME_W // 2
-    half_fh = FRAME_H // 2
-    packed_rgb = packed.convert('RGB')
-    packed_half = packed_rgb.resize((half_w, half_h), Image.LANCZOS)
-
-    packed_half.save(OUTPUT, 'PNG', optimize=True)
+    packed.save(OUTPUT, 'PNG', optimize=True)
     file_size = os.path.getsize(OUTPUT) / 1024 / 1024
     print(f"\nSaved: {OUTPUT}")
-    print(f"  Dimensions: {half_w}x{half_h} (half-res from {out_w}x{out_h})")
+    print(f"  Dimensions: {out_w}x{out_h}")
     print(f"  Frames: {total} ({half_fw}x{half_fh} each)")
     print(f"  Grid: {OUT_COLS} cols x {out_rows} rows")
     print(f"  File size: {file_size:.1f} MB")

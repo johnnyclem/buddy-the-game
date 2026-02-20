@@ -26,27 +26,35 @@ function hideStartButton() {
   document.getElementById('start-btn').style.display = 'none';
 }
 
+// Start from the menu — go to the world map
 function beginRun() {
-  state.mode     = 'play';
-  state.tick     = 0;
-  state.levelWon = false;
-  state.player.treatTimer = 0;
-  createWorld(Date.now());
   hideStartButton();
+  state.mode = 'map';
+  state.tick = 0;
+  initMap();
   document.getElementById('hud').style.opacity = '1';
 }
 
+// Go to the world map (from game over or after training)
+function goToMap() {
+  if (state.levelWon) {
+    // Advance to next level
+    state.level = Math.min(state.level + 1, LEVEL_DEFS.length);
+  }
+  state.mode = 'map';
+  state.tick = 0;
+  state.levelWon = false;
+  state.player.treatTimer = 0;
+  initMap();
+}
+
 // ── Mobile UI init ────────────────────────────────────────────────────────────
-// Wires up the mic button: toggles voice recognition and (on iOS) requests
-// DeviceOrientation permission via the required user-gesture path.
 
 function initMobileUI() {
   const micBtn = document.getElementById('mic-btn');
   if (!micBtn) return;
 
   micBtn.addEventListener('click', () => {
-    // iOS 13+ needs a user gesture to grant DeviceOrientation permission.
-    // Piggyback on the mic button tap so the player needs only one button.
     if (state.tilt.supported && !state.tilt.enabled) {
       requestTiltPermission();
     }

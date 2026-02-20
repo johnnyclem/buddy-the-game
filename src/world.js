@@ -1,5 +1,5 @@
-// World initialisation — generates platforms and collectibles from a seed
-// seed: integer used to deterministically generate level layout
+// World initialisation — generates level layout from hand-crafted definitions
+// Falls back to procedural generation for levels beyond the 7 defined ones
 
 const GROUND_Y    = 480;  // y-coordinate of the ground surface (canvas height 540)
 const TILE        = 32;   // base grid unit
@@ -17,27 +17,22 @@ function _rng(seed) {
 
 function createWorld(seed) {
   const rand = _rng(seed);
+  const levelNum = state.level;
+  const def = getLevelDef(levelNum);
 
-  // Ground: one long platform across the whole level
-  const levelWidth = 6000;
-  const platforms = [
-    { x: -200, y: GROUND_Y, w: levelWidth + 400, h: 60, isGround: true },
-  ];
+  // Generate level from definition
+  const generated = def.generate(rand);
+  const levelWidth = def.width;
 
-  // Generate floating platforms with gaps
-  let cx = 320;
-  while (cx < levelWidth - 200) {
-    const w    = TILE * (3 + Math.floor(rand() * 5));   // 3–7 tiles wide
-    const h    = TILE;
-    const y    = GROUND_Y - TILE * (3 + Math.floor(rand() * 5)); // 3–7 tiles up
-    platforms.push({ x: cx, y, w, h, isGround: false });
-    cx += w + TILE * (2 + Math.floor(rand() * 4));      // gap 2–5 tiles
-  }
+  const platforms = generated.platforms;
+  const hazards = generated.hazards || [];
+  const enemies = generated.enemies || [];
+  const movingPlatforms = generated.movingPlatforms || [];
 
-  // Bones (collectibles) — one floating above each platform
+  // Bones (collectibles) — one floating above each non-ground platform
   const bones = [];
-  for (let i = 1; i < platforms.length; i++) {
-    const p = platforms[i];
+  for (const p of platforms) {
+    if (p.isGround) continue;
     bones.push({
       x:       p.x + p.w / 2,
       y:       p.y - 28,
@@ -47,23 +42,33 @@ function createWorld(seed) {
     });
   }
 
-  // Treats (power-ups) — one every ~5 platforms, on the ground between gaps
+  // Treats (power-ups) — one every ~4 non-ground platforms
   const treats = [];
-  for (let i = 2; i < platforms.length; i += 5) {
-    const p = platforms[i];
-    treats.push({
-      x: p.x + p.w / 2,
-      y: p.y - 24,
-      w: 18,
-      h: 18,
-      collected: false,
-    });
+  let platCount = 0;
+  for (const p of platforms) {
+    if (p.isGround) continue;
+    platCount++;
+    if (platCount % 4 === 0) {
+      treats.push({
+        x: p.x + p.w / 2,
+        y: p.y - 24,
+        w: 18,
+        h: 18,
+        collected: false,
+      });
+    }
   }
 
   // Goal flag at end of level
   const flag = { x: levelWidth - 80, y: GROUND_Y - 96, collected: false };
 
-  state.world = { seed, platforms, bones, treats, flag, width: levelWidth };
+  state.world = {
+    seed, platforms, bones, treats, flag,
+    width: levelWidth,
+    hazards, enemies, movingPlatforms,
+    theme: def.theme,
+    levelDef: def,
+  };
   state.score = 0;
 
   // Reset player to start position

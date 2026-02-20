@@ -14,6 +14,10 @@ function gameLoop() {
     updateTraining(1 / 60);
     renderTraining();
     _renderVoiceFeedback();
+  } else if (state.mode === 'map') {
+    state.tick++;
+    updateMap(1 / 60);
+    render();
   } else {
     state.tick++;   // advance tick for menu/game-over animations
     render();
@@ -27,7 +31,7 @@ startButton.addEventListener('click', () => {
 
 // Bootstrap
 loadIntroSprites();   // kick off async spritesheet loading (no-op if none configured)
-createWorld(0);
+createWorld(1 * 7919); // use deterministic seed for level 1
 render();
 setCanvasScale();
 initVoice();

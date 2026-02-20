@@ -7,8 +7,25 @@ document.addEventListener('keydown', (event) => {
   if (event.code === 'Escape' && document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   }
+
+  // ── Map mode input ────────────────────────────────────────────────────
+  if (state.mode === 'map') {
+    if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
+      event.preventDefault();
+      mapInput(-1);
+    } else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
+      event.preventDefault();
+      mapInput(1);
+    } else if (event.code === 'Enter' || event.code === 'Space') {
+      event.preventDefault();
+      mapSelect();
+    }
+    return;
+  }
+
   if (event.code === 'Enter') {
-    if (state.mode === 'menu' || state.mode === 'over') beginRun();
+    if (state.mode === 'menu') beginRun();
+    else if (state.mode === 'over') goToMap();
   }
 
   // Movement — prevent page scroll on Space / arrow keys

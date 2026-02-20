@@ -10,6 +10,9 @@ const TREAT_MOVE   = 400;   // px/s while hopped up on treats
 const TREAT_JUMP   = 740;   // px/s jump while on treats
 const TREAT_TICKS  = 420;   // 7 seconds at 60fps
 
+const CRUMBLE_DELAY  = 30;  // frames before crumble platform falls
+const DISSOLVE_DELAY = 45;  // frames before dissolve platform vanishes
+
 function update(dt) {
   applyTiltInput(); // map device orientation → state.input before game logic
 
@@ -18,8 +21,13 @@ function update(dt) {
   if (!state.world) return;
 
   _updatePlayer(dt);
+  _updateEnemies(dt);
+  _updateMovingPlatforms(dt);
+  _updateCrumblePlatforms(dt);
   _updateCamera();
   _checkCollectibles();
+  _checkHazards(dt);
+  _checkEnemyCollisions();
   _checkGoal();
 }
 
@@ -37,9 +45,12 @@ function _updatePlayer(dt) {
   const jumpSpd  = hasTreat ? TREAT_JUMP : JUMP_SPD;
   const maxJumps = hasTreat ? 2 : 1;
 
+  // ── Icy physics check ──────────────────────────────────────────────────
+  const isIcy = state.world.levelDef && state.world.levelDef.icy;
+  const friction = isIcy ? 0.96 : 0.78;
+
   // ── Sit command ──────────────────────────────────────────────────────────
   if (inp.sit && p.onGround && !hasTreat) {
-    // Treats make Buddy too hyper to sit
     p.sitting  = true;
     p.sitTimer = SIT_TICKS;
     inp.sit    = false;
@@ -59,13 +70,21 @@ function _updatePlayer(dt) {
 
   // ── Horizontal movement ──────────────────────────────────────────────────
   if (inp.left) {
-    p.vx          = -movSpd;
+    if (isIcy) {
+      p.vx = Math.max(p.vx - movSpd * dt * 8, -movSpd);
+    } else {
+      p.vx = -movSpd;
+    }
     p.facingRight = false;
   } else if (inp.right) {
-    p.vx          = movSpd;
+    if (isIcy) {
+      p.vx = Math.min(p.vx + movSpd * dt * 8, movSpd);
+    } else {
+      p.vx = movSpd;
+    }
     p.facingRight = true;
   } else {
-    p.vx *= 0.78;
+    p.vx *= friction;
     if (Math.abs(p.vx) < 4) p.vx = 0;
   }
 
@@ -85,37 +104,37 @@ function _updatePlayer(dt) {
   // ── Gravity ──────────────────────────────────────────────────────────────
   p.vy += GRAVITY * dt;
 
-  // ── Move + collide ───────────────────────────────────────────────────────
+  // ── Move + collide ─────────────────────────────────────────────────────
   _resolveCollisions(p, dt);
 
   // Restore jumps when landing (resolve sets onGround)
   if (p.onGround) p.jumpsLeft = maxJumps;
 
-  // ── Clamp to left edge ───────────────────────────────────────────────────
+  // ── Clamp to left edge ─────────────────────────────────────────────────
   if (p.x < 0) { p.x = 0; p.vx = 0; }
 
-  // ── Fell off bottom — game over (treats make Buddy invincible) ───────────
+  // ── Fell off bottom — game over (treats make Buddy invincible) ─────────
   if (p.y > 640 && !hasTreat) {
     state.mode = 'over';
     return;
   } else if (p.y > 640 && hasTreat) {
-    // bounce back up instead
     p.y  = 630;
     p.vy = -TREAT_JUMP * 0.6;
   }
 
-  // ── Animate ─────────────────────────────────────────────────────────────
+  // ── Animate ───────────────────────────────────────────────────────────
   _animateRun(p, dt);
 }
 
 function _resolveCollisions(p, dt) {
-  const platforms = state.world.platforms;
+  const world = state.world;
+  const allPlatforms = _getActivePlatforms();
   p.onGround = false;
 
   // Move horizontally first
   p.x += p.vx * dt;
 
-  for (const plat of platforms) {
+  for (const plat of allPlatforms) {
     if (_overlaps(p, plat)) {
       if (p.vx > 0) { p.x = plat.x - p.w; p.vx = 0; }
       else if (p.vx < 0) { p.x = plat.x + plat.w; p.vx = 0; }
@@ -125,18 +144,43 @@ function _resolveCollisions(p, dt) {
   // Move vertically
   p.y += p.vy * dt;
 
-  for (const plat of platforms) {
+  for (const plat of allPlatforms) {
     if (_overlaps(p, plat)) {
       if (p.vy >= 0) {
         p.y        = plat.y - p.h;
         p.vy       = 0;
         p.onGround = true;
+
+        // Trigger crumble/dissolve on landing
+        if (plat.crumble && !plat.crumbled && plat.crumbleTimer === 0) {
+          plat.crumbleTimer = CRUMBLE_DELAY;
+        }
+        if (plat.dissolve && !plat.dissolved && plat.dissolveTimer === 0) {
+          plat.dissolveTimer = DISSOLVE_DELAY;
+        }
       } else {
         p.y  = plat.y + plat.h;
         p.vy = 0;
       }
     }
   }
+}
+
+// Get all collidable platforms (static + moving, excluding crumbled/dissolved)
+function _getActivePlatforms() {
+  const world = state.world;
+  const result = [];
+
+  for (const p of world.platforms) {
+    if (p.crumbled || p.dissolved) continue;
+    result.push(p);
+  }
+
+  for (const mp of world.movingPlatforms) {
+    result.push(mp);
+  }
+
+  return result;
 }
 
 function _overlaps(a, b) {
@@ -146,12 +190,147 @@ function _overlaps(a, b) {
          a.y + a.h > b.y;
 }
 
+// ── Enemies ──────────────────────────────────────────────────────────────────
+
+function _updateEnemies(dt) {
+  if (!state.world.enemies) return;
+
+  for (const e of state.world.enemies) {
+    if (e.type === 'bat') {
+      // Patrol horizontally
+      e.x += e.speed * e.dir * dt;
+      if (e.x <= e.minX) { e.x = e.minX; e.dir = 1; }
+      if (e.x >= e.maxX) { e.x = e.maxX; e.dir = -1; }
+      // Bob up and down
+      e.y += Math.sin(state.tick * 0.08) * 0.5;
+
+    } else if (e.type === 'snowball') {
+      // Roll along the ground
+      e.x += e.speed * e.dir * dt;
+      if (e.x <= e.minX) { e.x = e.minX; e.dir = 1; }
+      if (e.x >= e.maxX) { e.x = e.maxX; e.dir = -1; }
+
+    } else if (e.type === 'fire') {
+      // Periodic geyser — active for half the period
+      e._active = ((state.tick + (e.offset || 0)) % (e.period || 180)) < ((e.period || 180) / 2);
+    }
+  }
+}
+
+function _checkEnemyCollisions() {
+  if (!state.world.enemies) return;
+  const p = state.player;
+  const hasTreat = p.treatTimer > 0;
+
+  for (const e of state.world.enemies) {
+    if (e.type === 'fire' && !e._active) continue;
+
+    if (_overlaps(p, e)) {
+      if (hasTreat) {
+        // Invincible — knock enemy away
+        e.dir = -e.dir;
+      } else {
+        state.mode = 'over';
+        return;
+      }
+    }
+  }
+}
+
+// ── Moving Platforms ─────────────────────────────────────────────────────────
+
+function _updateMovingPlatforms(dt) {
+  if (!state.world.movingPlatforms) return;
+
+  for (const mp of state.world.movingPlatforms) {
+    if (!mp._dir) mp._dir = 1;
+
+    if (mp.axis === 'x') {
+      mp.x += mp.speed * mp._dir * dt;
+      if (mp.x <= mp.minX) { mp.x = mp.minX; mp._dir = 1; }
+      if (mp.x >= mp.maxX) { mp.x = mp.maxX; mp._dir = -1; }
+    } else {
+      mp.y += mp.speed * mp._dir * dt;
+      if (mp.y <= mp.minY) { mp.y = mp.minY; mp._dir = 1; }
+      if (mp.y >= mp.maxY) { mp.y = mp.maxY; mp._dir = -1; }
+    }
+  }
+}
+
+// ── Crumble / Dissolve Platforms ─────────────────────────────────────────────
+
+function _updateCrumblePlatforms(dt) {
+  for (const plat of state.world.platforms) {
+    if (plat.crumble && plat.crumbleTimer > 0) {
+      plat.crumbleTimer--;
+      if (plat.crumbleTimer <= 0) {
+        plat.crumbled = true;
+        // Respawn after 3 seconds
+        setTimeout(() => {
+          plat.crumbled = false;
+          plat.crumbleTimer = 0;
+        }, 3000);
+      }
+    }
+    if (plat.dissolve && plat.dissolveTimer > 0) {
+      plat.dissolveTimer--;
+      if (plat.dissolveTimer <= 0) {
+        plat.dissolved = true;
+        // Respawn after 4 seconds
+        setTimeout(() => {
+          plat.dissolved = false;
+          plat.dissolveTimer = 0;
+        }, 4000);
+      }
+    }
+  }
+}
+
 // ── Camera ────────────────────────────────────────────────────────────────────
 
 function _updateCamera() {
   const target = state.player.x - canvas.width * 0.35;
   const maxCam = state.world.width - canvas.width;
   state.camera.x = Math.max(0, Math.min(target, maxCam));
+}
+
+// ── Hazards ──────────────────────────────────────────────────────────────────
+
+function _checkHazards(dt) {
+  if (!state.world.hazards) return;
+  const p = state.player;
+  const hasTreat = p.treatTimer > 0;
+
+  for (const h of state.world.hazards) {
+    if (h.type === 'mud') {
+      // Slow zone — reduce speed when overlapping
+      if (_overlaps(p, h)) {
+        p.vx *= 0.5;
+      }
+    } else if (h.type === 'lava') {
+      // Instant death (unless treat)
+      if (_overlaps(p, h)) {
+        if (!hasTreat) {
+          state.mode = 'over';
+          return;
+        } else {
+          p.vy = -TREAT_JUMP * 0.5;
+          p.y = h.y - p.h - 10;
+        }
+      }
+    } else if (h.type === 'hydrant') {
+      // Knockback obstacle
+      if (_overlaps(p, h)) {
+        if (p.vx > 0) { p.x = h.x - p.w; p.vx = -80; }
+        else { p.x = h.x + h.w; p.vx = 80; }
+      }
+    } else if (h.type === 'wind') {
+      // Horizontal force
+      if (_overlaps(p, h)) {
+        p.vx += h.dir * h.strength * dt;
+      }
+    }
+  }
 }
 
 // ── Collectibles ──────────────────────────────────────────────────────────────
