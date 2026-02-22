@@ -1,5 +1,5 @@
 // Input handling — keyboard events and window resize
-// All movement keys write to state.input (shared with touch / voice / tilt)
+// All movement keys write to state.input (shared with touch, voice, and tilt)
 
 document.addEventListener('keydown', (event) => {
   // Meta / system keys
@@ -8,46 +8,33 @@ document.addEventListener('keydown', (event) => {
     document.exitFullscreen().catch(() => {});
   }
 
-  // ── Map mode input ────────────────────────────────────────────────────
-  if (state.mode === 'map') {
-    if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
-      event.preventDefault();
-      mapInput(-1);
-    } else if (event.code === 'ArrowRight' || event.code === 'KeyD') {
-      event.preventDefault();
-      mapInput(1);
-    } else if (event.code === 'Enter' || event.code === 'Space') {
-      event.preventDefault();
-      mapSelect();
+  // Start from menu
+  if (event.code === 'Enter' || event.code === 'Space') {
+    if (state.mode === 'menu') { beginRun(); return; }
+    if (state.mode === 'over') { beginRun(); return; }
+  }
+
+  // Interact / dialogue advance (Z, Enter, Space)
+  if (
+    event.code === 'KeyZ'   ||
+    event.code === 'Enter'  ||
+    event.code === 'Space'
+  ) {
+    event.preventDefault();
+    if (!state.input.interact) {
+      // Edge-trigger: only fire interactPressed on fresh press
+      state.input.interactPressed = true;
     }
+    state.input.interact = true;
     return;
   }
 
-  if (event.code === 'Enter') {
-    if (state.mode === 'menu') beginRun();
-    else if (state.mode === 'over') goToMap();
-  }
-
-  // Movement — prevent page scroll on Space / arrow keys
+  // Movement
   switch (event.code) {
-    case 'ArrowLeft':
-    case 'KeyA':
-      state.input.left  = true;  break;
-
-    case 'ArrowRight':
-    case 'KeyD':
-      state.input.right = true;  break;
-
-    case 'Space':
-    case 'ArrowUp':
-    case 'KeyW':
-      event.preventDefault();
-      state.input.jump  = true;  break;
-
-    case 'ArrowDown':
-    case 'KeyS':
-      event.preventDefault();
-      state.input.sit   = true;  break;
+    case 'ArrowLeft':  case 'KeyA': event.preventDefault(); state.input.left  = true; break;
+    case 'ArrowRight': case 'KeyD': event.preventDefault(); state.input.right = true; break;
+    case 'ArrowUp':    case 'KeyW': event.preventDefault(); state.input.up    = true; break;
+    case 'ArrowDown':  case 'KeyS': event.preventDefault(); state.input.down  = true; break;
   }
 });
 
@@ -55,8 +42,11 @@ document.addEventListener('keyup', (event) => {
   switch (event.code) {
     case 'ArrowLeft':  case 'KeyA': state.input.left  = false; break;
     case 'ArrowRight': case 'KeyD': state.input.right = false; break;
-    case 'Space': case 'ArrowUp':  case 'KeyW': state.input.jump = false; break;
-    case 'ArrowDown':  case 'KeyS': state.input.sit   = false; break;
+    case 'ArrowUp':    case 'KeyW': state.input.up    = false; break;
+    case 'ArrowDown':  case 'KeyS': state.input.down  = false; break;
+    case 'KeyZ': case 'Enter': case 'Space':
+      state.input.interact = false;
+      break;
   }
 });
 

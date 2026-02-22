@@ -2,26 +2,14 @@
 
 const startButton = document.getElementById('start-btn');
 
-function gameStep() {
-  update(1 / 60);
-  render();
-}
-
 function gameLoop() {
-  if (state.mode === 'play') {
-    gameStep();
-  } else if (state.mode === 'training') {
-    updateTraining(1 / 60);
-    renderTraining();
-    _renderVoiceFeedback();
-  } else if (state.mode === 'map') {
-    state.tick++;
-    updateMap(1 / 60);
-    render();
-  } else {
-    state.tick++;   // advance tick for menu/game-over animations
-    render();
+  state.tick++;
+
+  if (state.mode === 'play' || state.mode === 'dialogue') {
+    update(1 / 60);
   }
+
+  render();
   requestAnimationFrame(gameLoop);
 }
 
@@ -30,13 +18,12 @@ startButton.addEventListener('click', () => {
 });
 
 // Bootstrap
-loadIntroSprites();   // kick off async spritesheet loading (no-op if none configured)
-createWorld(1 * 7919); // use deterministic seed for level 1
-render();
+loadIntroSprites();   // async — no-op if none configured
 setCanvasScale();
 initVoice();
 initTilt();
 initTouchControls();
 initMobileUI();
+render();             // draw menu frame before game loop starts
 gameLoop();
-showStartButton('Start BUDDY\'S QUEST');
+showStartButton("BUDDY'S QUEST\n\nTop-Down Edition\n\nPress Start!");

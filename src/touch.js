@@ -1,4 +1,4 @@
-// On-screen touch controls — D-pad (left/right) and jump button
+// On-screen touch controls — 4-way D-pad + interact button
 // Automatically shown on touch-capable devices
 
 function initTouchControls() {
@@ -11,21 +11,20 @@ function initTouchControls() {
   if (touchControls) touchControls.style.display = 'block';
   if (micBtn)        micBtn.style.display         = 'flex';
 
-  // Bind each button: set state.input on press, clear on release
+  // D-pad directions
+  _bindButton('btn-left',  () => { state.input.left  = true;  }, () => { state.input.left  = false; });
+  _bindButton('btn-right', () => { state.input.right = true;  }, () => { state.input.right = false; });
+  _bindButton('btn-up',    () => { state.input.up    = true;  }, () => { state.input.up    = false; });
+  _bindButton('btn-down',  () => { state.input.down  = true;  }, () => { state.input.down  = false; });
+
+  // Action / interact button
   _bindButton(
-    'btn-left',
-    () => { state.input.left  = true;  },
-    () => { state.input.left  = false; },
-  );
-  _bindButton(
-    'btn-right',
-    () => { state.input.right = true;  },
-    () => { state.input.right = false; },
-  );
-  _bindButton(
-    'btn-jump',
-    () => { state.input.jump  = true;  },
-    () => { state.input.jump  = false; },
+    'btn-interact',
+    () => {
+      if (!state.input.interact) state.input.interactPressed = true;
+      state.input.interact = true;
+    },
+    () => { state.input.interact = false; },
   );
 }
 
@@ -33,7 +32,6 @@ function _bindButton(id, onDown, onUp) {
   const el = document.getElementById(id);
   if (!el) return;
 
-  // Touch (primary — passive:false so we can call preventDefault)
   el.addEventListener('touchstart',  (e) => { e.preventDefault(); onDown(); }, { passive: false });
   el.addEventListener('touchend',    (e) => { e.preventDefault(); onUp();   }, { passive: false });
   el.addEventListener('touchcancel', (e) => { e.preventDefault(); onUp();   }, { passive: false });

@@ -1,393 +1,288 @@
-// Game logic — called once per frame during 'play' mode
-// dt: delta time in seconds (fixed at 1/60)
+// Game logic — top-down movement, collision, dialogue, item pickup, exits
+// Called once per frame at 60 fps (dt = 1/60 s)
 
-const GRAVITY      = 1400;  // px/s²
-const MOVE_SPD     = 220;   // px/s horizontal (normal)
-const JUMP_SPD     = 560;   // px/s initial vertical velocity (normal)
-const SIT_TICKS    = 36;    // frames Buddy stays sitting after command
-
-const TREAT_MOVE   = 400;   // px/s while hopped up on treats
-const TREAT_JUMP   = 740;   // px/s jump while on treats
-const TREAT_TICKS  = 420;   // 7 seconds at 60fps
-
-const CRUMBLE_DELAY  = 30;  // frames before crumble platform falls
-const DISSOLVE_DELAY = 45;  // frames before dissolve platform vanishes
+const CHAR_SPEED   = 0.04;  // seconds between typewriter character reveals
+const INTERACT_RANGE = 52;  // px — how close player must be to trigger NPC talk
+const SIT_FRAMES   = 120;   // how long the voice "sit" command holds
 
 function update(dt) {
-  applyTiltInput(); // map device orientation → state.input before game logic
+  applyTiltInput(); // device orientation → state.input
 
-  state.tick++;
+  if (state.mode === 'dialogue') {
+    _updateDialogue(dt);
+    return;
+  }
 
-  if (!state.world) return;
+  if (state.mode !== 'play') return;
 
   _updatePlayer(dt);
-  _updateEnemies(dt);
-  _updateMovingPlatforms(dt);
-  _updateCrumblePlatforms(dt);
-  _updateCamera();
-  _checkCollectibles();
-  _checkHazards(dt);
-  _checkEnemyCollisions();
-  _checkGoal();
+  _updateNPCProximity();
+  _checkItems();
+  _checkExits();
 }
 
-// ── Player ────────────────────────────────────────────────────────────────────
+// ── Player ─────────────────────────────────────────────────────────────────────
 
 function _updatePlayer(dt) {
   const p   = state.player;
   const inp = state.input;
 
-  // Treat timer countdown
-  if (p.treatTimer > 0) p.treatTimer--;
-
-  const hasTreat = p.treatTimer > 0;
-  const movSpd   = hasTreat ? TREAT_MOVE : MOVE_SPD;
-  const jumpSpd  = hasTreat ? TREAT_JUMP : JUMP_SPD;
-  const maxJumps = hasTreat ? 2 : 1;
-
-  // ── Icy physics check ──────────────────────────────────────────────────
-  const isIcy = state.world.levelDef && state.world.levelDef.icy;
-  const friction = isIcy ? 0.96 : 0.78;
-
-  // ── Sit command ──────────────────────────────────────────────────────────
-  if (inp.sit && p.onGround && !hasTreat) {
-    p.sitting  = true;
-    p.sitTimer = SIT_TICKS;
-    inp.sit    = false;
-  }
+  // Tick-down timers
+  if (p.interactCooldown > 0) p.interactCooldown--;
+  if (p.treatTimer > 0)       p.treatTimer--;
   if (p.sitTimer > 0) {
     p.sitTimer--;
     if (p.sitTimer === 0) p.sitting = false;
   }
 
+  // Consume the one-shot interact flag
+  if (inp.interactPressed) {
+    inp.interactPressed = false;
+    if (p.interactCooldown === 0) {
+      _tryInteract();
+    }
+  }
+
   if (p.sitting) {
-    p.vx = 0;
-    p.vy += GRAVITY * dt;
-    _resolveCollisions(p, dt);
-    p.animFrame = 3;
+    p.moving = false;
+    _animatePlayer(p, dt);
     return;
   }
 
-  // ── Horizontal movement ──────────────────────────────────────────────────
-  if (inp.left) {
-    if (isIcy) {
-      p.vx = Math.max(p.vx - movSpd * dt * 8, -movSpd);
+  // Directional input → velocity
+  let dx = 0, dy = 0;
+  if (inp.left)  dx -= 1;
+  if (inp.right) dx += 1;
+  if (inp.up)    dy -= 1;
+  if (inp.down)  dy += 1;
+
+  p.moving = (dx !== 0 || dy !== 0);
+
+  // Normalize diagonals
+  if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+
+  // Update facing direction (prefer the dominant axis)
+  if (p.moving) {
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      p.dir = dx > 0 ? 'right' : 'left';
     } else {
-      p.vx = -movSpd;
+      p.dir = dy > 0 ? 'down' : 'up';
     }
-    p.facingRight = false;
-  } else if (inp.right) {
-    if (isIcy) {
-      p.vx = Math.min(p.vx + movSpd * dt * 8, movSpd);
-    } else {
-      p.vx = movSpd;
-    }
-    p.facingRight = true;
+  }
+
+  const speed = p.speed * (p.treatTimer > 0 ? 1.6 : 1.0) * dt;
+
+  // Resolve collision per axis independently (allows wall-sliding)
+  _tryMove(p, dx * speed, 0);
+  _tryMove(p, 0, dy * speed);
+
+  _animatePlayer(p, dt);
+}
+
+function _tryMove(p, dx, dy) {
+  const nx = p.x + dx;
+  const ny = p.y + dy;
+
+  if (!_collides(nx, p.y, p.w, p.h)) p.x = nx;
+  if (!_collides(p.x, ny, p.w, p.h)) p.y = ny;
+}
+
+// AABB tile collision — checks all four corners of the hitbox
+function _collides(cx, cy, hw, hh) {
+  const tiles = state.room.def.tiles;
+  const corners = [
+    [cx - hw, cy - hh],
+    [cx + hw - 1, cy - hh],
+    [cx - hw, cy + hh - 1],
+    [cx + hw - 1, cy + hh - 1],
+  ];
+  for (const [px, py] of corners) {
+    const col = Math.floor(px / TS);
+    const row = Math.floor(py / TS);
+    if (col < 0 || col >= ROOM_COLS || row < 0 || row >= ROOM_ROWS) return true;
+    const tile = tiles[row][col];
+    if (SOLID_TILES.has(tile)) return true;
+  }
+  return false;
+}
+
+// ── Animation ──────────────────────────────────────────────────────────────────
+
+function _animatePlayer(p, dt) {
+  if (!p.moving || p.sitting) {
+    p.animFrame = 0;
+    p.animTimer = 0;
+    return;
+  }
+  const frameTime = p.treatTimer > 0 ? 0.07 : 0.12;
+  p.animTimer += dt;
+  if (p.animTimer >= frameTime) {
+    p.animTimer = 0;
+    p.animFrame = (p.animFrame + 1) % 4;
+  }
+}
+
+// ── NPC proximity ─────────────────────────────────────────────────────────────
+
+function _updateNPCProximity() {
+  const p = state.player;
+  for (const npc of state.room.npcs) {
+    const nx = npc.col * TS + TS / 2;
+    const ny = npc.row * TS + TS / 2;
+    const d  = Math.hypot(p.x - nx, p.y - ny);
+    npc._showPrompt = (d < INTERACT_RANGE);
+  }
+}
+
+// ── Interaction ───────────────────────────────────────────────────────────────
+
+function _tryInteract() {
+  const p = state.player;
+
+  // Find nearest NPC in range
+  let nearest = null;
+  let nearestDist = INTERACT_RANGE;
+
+  for (const npc of state.room.npcs) {
+    const nx = npc.col * TS + TS / 2;
+    const ny = npc.row * TS + TS / 2;
+    const d  = Math.hypot(p.x - nx, p.y - ny);
+    if (d < nearestDist) { nearestDist = d; nearest = npc; }
+  }
+
+  if (nearest) {
+    _startDialogue(nearest);
+    state.player.interactCooldown = 10;
+  }
+}
+
+function _startDialogue(npc) {
+  const d = state.dialogue;
+  d.active      = true;
+  d.npcId       = npc.id;
+  d.lines       = npc.dialogue;
+  d.lineIndex   = 0;
+  d.charIndex   = 0;
+  d.charTimer   = 0;
+  d.allRevealed = false;
+  state.mode    = 'dialogue';
+
+  // Face player toward NPC
+  const p  = state.player;
+  const nx = npc.col * TS + TS / 2;
+  const ny = npc.row * TS + TS / 2;
+  const dx = nx - p.x;
+  const dy = ny - p.y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    p.dir = dx > 0 ? 'right' : 'left';
   } else {
-    p.vx *= friction;
-    if (Math.abs(p.vx) < 4) p.vx = 0;
+    p.dir = dy > 0 ? 'down' : 'up';
   }
-
-  // ── Jump (edge-triggered, supports double-jump) ──────────────────────────
-  if (inp.jump && !p.jumpPressed) {
-    if (p.jumpsLeft > 0) {
-      p.vy          = -jumpSpd;
-      p.onGround    = false;
-      p.jumpsLeft--;
-      p.jumpPressed = true;
-    }
-  }
-  if (!inp.jump) {
-    p.jumpPressed = false;
-  }
-
-  // ── Gravity ──────────────────────────────────────────────────────────────
-  p.vy += GRAVITY * dt;
-
-  // ── Move + collide ─────────────────────────────────────────────────────
-  _resolveCollisions(p, dt);
-
-  // Restore jumps when landing (resolve sets onGround)
-  if (p.onGround) p.jumpsLeft = maxJumps;
-
-  // ── Clamp to left edge ─────────────────────────────────────────────────
-  if (p.x < 0) { p.x = 0; p.vx = 0; }
-
-  // ── Fell off bottom — game over (treats make Buddy invincible) ─────────
-  if (p.y > 640 && !hasTreat) {
-    state.mode = 'over';
-    return;
-  } else if (p.y > 640 && hasTreat) {
-    p.y  = 630;
-    p.vy = -TREAT_JUMP * 0.6;
-  }
-
-  // ── Animate ───────────────────────────────────────────────────────────
-  _animateRun(p, dt);
 }
 
-function _resolveCollisions(p, dt) {
-  const world = state.world;
-  const allPlatforms = _getActivePlatforms();
-  p.onGround = false;
+// ── Dialogue advancement ──────────────────────────────────────────────────────
 
-  // Move horizontally first
-  p.x += p.vx * dt;
+function _updateDialogue(dt) {
+  const d   = state.dialogue;
+  const inp = state.input;
 
-  for (const plat of allPlatforms) {
-    if (_overlaps(p, plat)) {
-      if (p.vx > 0) { p.x = plat.x - p.w; p.vx = 0; }
-      else if (p.vx < 0) { p.x = plat.x + plat.w; p.vx = 0; }
-    }
-  }
-
-  // Move vertically
-  p.y += p.vy * dt;
-
-  for (const plat of allPlatforms) {
-    if (_overlaps(p, plat)) {
-      if (p.vy >= 0) {
-        p.y        = plat.y - p.h;
-        p.vy       = 0;
-        p.onGround = true;
-
-        // Trigger crumble/dissolve on landing
-        if (plat.crumble && !plat.crumbled && plat.crumbleTimer === 0) {
-          plat.crumbleTimer = CRUMBLE_DELAY;
-        }
-        if (plat.dissolve && !plat.dissolved && plat.dissolveTimer === 0) {
-          plat.dissolveTimer = DISSOLVE_DELAY;
-        }
-      } else {
-        p.y  = plat.y + plat.h;
-        p.vy = 0;
+  // Typewriter effect
+  if (!d.allRevealed) {
+    d.charTimer += dt;
+    if (d.charTimer >= CHAR_SPEED) {
+      d.charTimer = 0;
+      const line = d.lines[d.lineIndex] || '';
+      d.charIndex++;
+      if (d.charIndex >= line.length) {
+        d.charIndex   = line.length;
+        d.allRevealed = true;
       }
     }
-  }
-}
-
-// Get all collidable platforms (static + moving, excluding crumbled/dissolved)
-function _getActivePlatforms() {
-  const world = state.world;
-  const result = [];
-
-  for (const p of world.platforms) {
-    if (p.crumbled || p.dissolved) continue;
-    result.push(p);
-  }
-
-  for (const mp of world.movingPlatforms) {
-    result.push(mp);
-  }
-
-  return result;
-}
-
-function _overlaps(a, b) {
-  return a.x < b.x + b.w &&
-         a.x + a.w > b.x &&
-         a.y < b.y + b.h &&
-         a.y + a.h > b.y;
-}
-
-// ── Enemies ──────────────────────────────────────────────────────────────────
-
-function _updateEnemies(dt) {
-  if (!state.world.enemies) return;
-
-  for (const e of state.world.enemies) {
-    if (e.type === 'bat') {
-      // Patrol horizontally
-      e.x += e.speed * e.dir * dt;
-      if (e.x <= e.minX) { e.x = e.minX; e.dir = 1; }
-      if (e.x >= e.maxX) { e.x = e.maxX; e.dir = -1; }
-      // Bob up and down
-      e.y += Math.sin(state.tick * 0.08) * 0.5;
-
-    } else if (e.type === 'snowball') {
-      // Roll along the ground
-      e.x += e.speed * e.dir * dt;
-      if (e.x <= e.minX) { e.x = e.minX; e.dir = 1; }
-      if (e.x >= e.maxX) { e.x = e.maxX; e.dir = -1; }
-
-    } else if (e.type === 'fire') {
-      // Periodic geyser — active for half the period
-      e._active = ((state.tick + (e.offset || 0)) % (e.period || 180)) < ((e.period || 180) / 2);
+    // Holding interact skips to end of line
+    if (inp.interact) {
+      d.charIndex   = (d.lines[d.lineIndex] || '').length;
+      d.allRevealed = true;
     }
   }
-}
 
-function _checkEnemyCollisions() {
-  if (!state.world.enemies) return;
-  const p = state.player;
-  const hasTreat = p.treatTimer > 0;
+  // Edge-triggered advance
+  if (inp.interactPressed) {
+    inp.interactPressed = false;
 
-  for (const e of state.world.enemies) {
-    if (e.type === 'fire' && !e._active) continue;
-
-    if (_overlaps(p, e)) {
-      if (hasTreat) {
-        // Invincible — knock enemy away
-        e.dir = -e.dir;
-      } else {
-        state.mode = 'over';
-        return;
-      }
-    }
-  }
-}
-
-// ── Moving Platforms ─────────────────────────────────────────────────────────
-
-function _updateMovingPlatforms(dt) {
-  if (!state.world.movingPlatforms) return;
-
-  for (const mp of state.world.movingPlatforms) {
-    if (!mp._dir) mp._dir = 1;
-
-    if (mp.axis === 'x') {
-      mp.x += mp.speed * mp._dir * dt;
-      if (mp.x <= mp.minX) { mp.x = mp.minX; mp._dir = 1; }
-      if (mp.x >= mp.maxX) { mp.x = mp.maxX; mp._dir = -1; }
+    if (!d.allRevealed) {
+      // Skip to end of current line
+      d.charIndex   = (d.lines[d.lineIndex] || '').length;
+      d.allRevealed = true;
     } else {
-      mp.y += mp.speed * mp._dir * dt;
-      if (mp.y <= mp.minY) { mp.y = mp.minY; mp._dir = 1; }
-      if (mp.y >= mp.maxY) { mp.y = mp.maxY; mp._dir = -1; }
-    }
-  }
-}
-
-// ── Crumble / Dissolve Platforms ─────────────────────────────────────────────
-
-function _updateCrumblePlatforms(dt) {
-  for (const plat of state.world.platforms) {
-    if (plat.crumble && plat.crumbleTimer > 0) {
-      plat.crumbleTimer--;
-      if (plat.crumbleTimer <= 0) {
-        plat.crumbled = true;
-        // Respawn after 3 seconds
-        setTimeout(() => {
-          plat.crumbled = false;
-          plat.crumbleTimer = 0;
-        }, 3000);
-      }
-    }
-    if (plat.dissolve && plat.dissolveTimer > 0) {
-      plat.dissolveTimer--;
-      if (plat.dissolveTimer <= 0) {
-        plat.dissolved = true;
-        // Respawn after 4 seconds
-        setTimeout(() => {
-          plat.dissolved = false;
-          plat.dissolveTimer = 0;
-        }, 4000);
+      // Advance to next line or close
+      d.lineIndex++;
+      if (d.lineIndex >= d.lines.length) {
+        _closeDialogue();
+      } else {
+        d.charIndex   = 0;
+        d.charTimer   = 0;
+        d.allRevealed = false;
       }
     }
   }
 }
 
-// ── Camera ────────────────────────────────────────────────────────────────────
+function _closeDialogue() {
+  const d   = state.dialogue;
+  const npc = state.room.npcs.find(n => n.id === d.npcId);
+  if (npc) { npc.dialogueSeen = true; npc._showPrompt = false; }
 
-function _updateCamera() {
-  const target = state.player.x - canvas.width * 0.35;
-  const maxCam = state.world.width - canvas.width;
-  state.camera.x = Math.max(0, Math.min(target, maxCam));
-}
-
-// ── Hazards ──────────────────────────────────────────────────────────────────
-
-function _checkHazards(dt) {
-  if (!state.world.hazards) return;
-  const p = state.player;
-  const hasTreat = p.treatTimer > 0;
-
-  for (const h of state.world.hazards) {
-    if (h.type === 'mud') {
-      // Slow zone — reduce speed when overlapping
-      if (_overlaps(p, h)) {
-        p.vx *= 0.5;
-      }
-    } else if (h.type === 'lava') {
-      // Instant death (unless treat)
-      if (_overlaps(p, h)) {
-        if (!hasTreat) {
-          state.mode = 'over';
-          return;
-        } else {
-          p.vy = -TREAT_JUMP * 0.5;
-          p.y = h.y - p.h - 10;
-        }
-      }
-    } else if (h.type === 'hydrant') {
-      // Knockback obstacle
-      if (_overlaps(p, h)) {
-        if (p.vx > 0) { p.x = h.x - p.w; p.vx = -80; }
-        else { p.x = h.x + h.w; p.vx = 80; }
-      }
-    } else if (h.type === 'wind') {
-      // Horizontal force
-      if (_overlaps(p, h)) {
-        p.vx += h.dir * h.strength * dt;
-      }
-    }
-  }
-}
-
-// ── Collectibles ──────────────────────────────────────────────────────────────
-
-function _checkCollectibles() {
-  const p = state.player;
-
-  for (const bone of state.world.bones) {
-    if (!bone.collected && _overlaps(p, bone)) {
-      bone.collected = true;
-      state.score++;
-    }
-  }
-
-  for (const treat of state.world.treats) {
-    if (!treat.collected && _overlaps(p, treat)) {
-      treat.collected    = true;
-      p.treatTimer       = TREAT_TICKS;
-      p.jumpsLeft        = 2; // immediately grant double-jump
-    }
-  }
-}
-
-function _checkGoal() {
-  const f = state.world.flag;
-  const p = state.player;
-  if (!f.collected && _overlaps(p, { x: f.x, y: f.y, w: 20, h: 96 })) {
-    f.collected    = true;
-    state.levelWon = true;
-
-    // Determine which command to unlock next
-    const nextUnlockIdx = state.level - 1; // level 1 beat = unlock index 0
-    if (nextUnlockIdx < UNLOCK_ORDER.length) {
-      const nextCmd = UNLOCK_ORDER[nextUnlockIdx];
-      state.unlockedCommands.push(nextCmd);
-      startTraining(nextCmd);
-    } else {
-      // All commands unlocked — just show win screen
-      state.mode = 'over';
-    }
-  }
-}
-
-// ── Animation helpers ─────────────────────────────────────────────────────────
-
-function _animateRun(p, dt) {
-  if (!p.onGround) {
-    p.animFrame = 2; // airborne frame
+  // Win condition: finished talking to Mr. Whiskers
+  if (d.npcId === 'whiskers') {
+    state.gameWon = true;
+    state.mode    = 'over';
     return;
   }
-  if (Math.abs(p.vx) > 10) {
-    p.animTimer += dt;
-    if (p.animTimer > (p.treatTimer > 0 ? 0.07 : 0.12)) {
-      p.animTimer = 0;
-      p.animFrame = (p.animFrame + 1) % 2;
+
+  d.active    = false;
+  d.npcId     = '';
+  state.mode  = 'play';
+  state.player.interactCooldown = 30;
+}
+
+// ── Item pickup ───────────────────────────────────────────────────────────────
+
+function _checkItems() {
+  const p = state.player;
+  for (const item of state.room.items) {
+    if (item.collected) continue;
+    const ix = item.col * TS + TS / 2;
+    const iy = item.row * TS + TS / 2;
+    if (Math.abs(p.x - ix) < 20 && Math.abs(p.y - iy) < 20) {
+      item.collected = true;
+      if (item.type === 'bone')  state.score++;
+      if (item.type === 'treat') { state.treats++; state.player.treatTimer = 300; }
+      // Ball: just collect for fun
     }
-  } else {
-    p.animFrame = 0; // idle
+  }
+}
+
+// ── Room exits ────────────────────────────────────────────────────────────────
+
+function _checkExits() {
+  const p  = state.player;
+  const pc = Math.floor(p.x / TS);  // player tile column
+  const pr = Math.floor(p.y / TS);  // player tile row
+
+  for (const exit of state.room.exits) {
+    let triggered = false;
+    if (exit.dir === 'south' && pr >= ROOM_ROWS - 1) {
+      triggered = pc >= exit.minCol && pc <= exit.maxCol;
+    } else if (exit.dir === 'north' && pr <= 0) {
+      triggered = pc >= exit.minCol && pc <= exit.maxCol;
+    } else if (exit.dir === 'west' && pc <= 0) {
+      triggered = pr >= exit.minRow && pr <= exit.maxRow;
+    } else if (exit.dir === 'east' && pc >= ROOM_COLS - 1) {
+      triggered = pr >= exit.minRow && pr <= exit.maxRow;
+    }
+    if (triggered) {
+      enterRoom(exit.targetRoom, exit.targetCol, exit.targetRow);
+      return;
+    }
   }
 }
